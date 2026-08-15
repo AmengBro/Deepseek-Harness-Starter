@@ -37,6 +37,16 @@ npm run tauri build
 
 产物位于 `src-tauri/target/release/bundle/`。
 
+## 安装器（MewUI）
+
+`setup/DeepseekHarness.Setup` 是一个基于 [MewUI](https://github.com/aprillz/MewUI)（Direct2D + Mica 材质，样式参考 Starward.Setup）的按用户安装器，无需管理员权限：
+
+```bash
+dotnet publish setup/DeepseekHarness.Setup/DeepseekHarness.Setup.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:MewUIBackend=Direct2D
+```
+
+发布产物为单文件 `DeepseekHarness.Setup.exe`，内嵌应用负载，支持 `/S` 静默安装与 `uninstall /S` 静默卸载。最终安装包可复制到 `dist/` 随 GitHub Release 发布。
+
 ## 使用说明
 
 1. 首次启动时工具会自动检测 Node.js；若未安装，会提示前往 [nodejs.org](https://nodejs.org) 下载。

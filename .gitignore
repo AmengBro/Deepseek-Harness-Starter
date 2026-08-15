@@ -135,3 +135,7 @@ dist
 .yarn/install-state.gz
 .pnp.*
 /src-tauri/target
+
+# .NET setup project
+setup/**/bin/
+setup/**/obj/

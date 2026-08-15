@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <AssemblyName>DeepseekHarness.Setup</AssemblyName>
+    <RootNamespace>DeepseekHarness.Setup</RootNamespace>
+    <Version>1.0.1</Version>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <MewUIBackend>Direct2D</MewUIBackend>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aprillz.MewUI" Version="0.19.1" />
+    <PackageReference Include="Vanara.PInvoke.ComCtl32" Version="5.0.5" />
+    <PackageReference Include="WindowsShortcutFactory" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\AppLogo.png" LogicalName="Assets.AppLogo.png" />
+    <EmbeddedResource Include="..\..\src-tauri\target\release\DeepseekHarness.exe"
+                      Link="Payload\DeepseekHarness.exe"
+                      LogicalName="Payload.DeepseekHarness.exe" />
+  </ItemGroup>
+
+  <Target Name="CheckReleasePayload" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('..\..\src-tauri\target\release\DeepseekHarness.exe')"
+           Text="未找到 release 构建产物（src-tauri\target\release\DeepseekHarness.exe），请先执行 npm run tauri build 构建应用。" />
+  </Target>
+
+</Project>
