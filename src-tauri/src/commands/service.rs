@@ -447,18 +447,20 @@ pub async fn start_service(
     let port = find_available_port(config.port).await?;
     crate::logger::log_to_file(&install_dir, "INFO", &format!("端口检测完成: {}", port));
 
+    // 临时切换端口仅本次运行生效，不写回配置：
+    // 若原先占用的端口之后被释放，下次启动仍会使用用户配置的端口
     if port != config.port {
-        let mut new_config = config.clone();
-        new_config.port = port;
-        new_config.save(&install_dir)?;
         crate::logger::log_to_file(
             &install_dir,
-            "INFO",
-            &format!("端口 {} 被占用，已切换到端口 {}", config.port, port),
+            "WARN",
+            &format!(
+                "端口 {} 被其他程序占用，本次运行临时使用端口 {}（配置保持为 {}）",
+                config.port, port, config.port
+            ),
         );
         let _ = app_handle.emit_all("service-log", format!(
-            "[系统] 端口 {} 被占用，已自动切换到端口 {} 并更新配置",
-            config.port, port
+            "[系统] 端口 {} 被其他程序占用，本次运行临时使用端口 {}（配置仍保持为 {}，下次启动仍使用配置端口）",
+            config.port, port, config.port
         ));
     }
 
@@ -743,17 +745,17 @@ async fn start_service_internal(
     let port = find_available_port(config.port).await?;
 
     if port != config.port {
-        let mut new_config = config.clone();
-        new_config.port = port;
-        new_config.save(&install_dir)?;
         crate::logger::log_to_file(
             &install_dir,
-            "INFO",
-            &format!("端口 {} 被占用，已切换到端口 {}", config.port, port),
+            "WARN",
+            &format!(
+                "端口 {} 被其他程序占用，本次运行临时使用端口 {}（配置保持为 {}）",
+                config.port, port, config.port
+            ),
         );
         let _ = app_handle.emit_all("service-log", format!(
-            "[系统] 端口 {} 被占用，已自动切换到端口 {} 并更新配置",
-            config.port, port
+            "[系统] 端口 {} 被其他程序占用，本次运行临时使用端口 {}（配置仍保持为 {}）",
+            config.port, port, config.port
         ));
     }
 
