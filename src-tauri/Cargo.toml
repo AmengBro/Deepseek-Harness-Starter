@@ -1,0 +1,54 @@
+[package]
+name = "deepseek-harness"
+version = "1.0.1"
+description = "DeepseekHarness - 本地 Web 服务一键启动工具"
+authors = ["AmengBro", "Codex (OpenAI)"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5.0", features = [] }
+
+[dependencies]
+tauri = { version = "1.6", features = [
+    "dialog-open",
+    "shell-open",
+    "fs-create-dir",
+    "fs-read-file",
+    "fs-write-file",
+    "path-all",
+    "os-all",
+    "window-create",
+    "window-center",
+    "window-show",
+    "window-hide",
+    "window-set-resizable",
+    "window-set-title",
+    "window-maximize",
+    "window-unmaximize",
+    "window-minimize",
+    "window-close",
+    "window-set-decorations",
+    "window-set-always-on-top",
+    "window-set-size",
+    "window-set-min-size",
+    "window-set-max-size",
+    "window-set-position",
+    "window-set-fullscreen",
+    "window-set-focus",
+    "window-start-dragging",
+    "system-tray",
+    "icon-png",
+    "global-shortcut-all",
+    "clipboard-all",
+    "process-exit",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

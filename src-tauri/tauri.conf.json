@@ -1,0 +1,93 @@
+{
+  "$schema": "https://schema.tauri.app/config/1",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist"
+  },
+  "package": {
+    "productName": "DeepseekHarness",
+    "version": "1.0.1"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "dialog": { "open": true },
+      "shell": { "open": true },
+      "fs": {
+        "all": false,
+        "createDir": true,
+        "readFile": true,
+        "writeFile": true,
+        "scope": ["**"]
+      },
+      "path": { "all": true },
+      "os": { "all": true },
+      "window": {
+        "all": false,
+        "create": true,
+        "center": true,
+        "show": true,
+        "hide": true,
+        "setResizable": true,
+        "setTitle": true,
+        "maximize": true,
+        "unmaximize": true,
+        "minimize": true,
+        "close": true,
+        "setDecorations": true,
+        "setAlwaysOnTop": true,
+        "setSize": true,
+        "setMinSize": true,
+        "setMaxSize": true,
+        "setPosition": true,
+        "setFullscreen": true,
+        "setFocus": true,
+        "startDragging": true
+      },
+      "globalShortcut": { "all": true },
+      "clipboard": { "all": true },
+      "process": { "exit": true }
+    },
+    "systemTray": {
+      "iconPath": "icons/icon.ico"
+    },
+    "bundle": {
+      "active": true,
+      "targets": ["nsis", "app", "deb"],
+      "identifier": "com.deepseekharness.starter",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "category": "Productivity",
+      "shortDescription": "DeepseekHarness - 本地 Web 服务一键启动工具",
+      "longDescription": "轻量级桌面工具，一键启动 DeepSeek 本地 Web 服务并在内嵌 WebView 中展示。",
+      "copyright": "2026 AmengBro",
+      "resources": [
+        "icons/*",
+        "deepseek.ico"
+      ]
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "DeepseekHarness",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 400,
+        "minHeight": 300,
+        "decorations": false,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ]
+  }
+}

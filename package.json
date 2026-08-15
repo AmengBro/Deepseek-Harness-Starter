@@ -1,0 +1,22 @@
+{
+  "name": "deepseek-harness",
+  "private": true,
+  "version": "1.0.1",
+  "author": "AmengBro",
+  "contributors": ["Codex (OpenAI)"],
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.11",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

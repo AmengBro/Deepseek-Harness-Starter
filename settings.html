@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepseekHarness - 设置</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+        body { overflow: auto; user-select: text; }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <div class="settings-title">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 1L6.5 3.2L4 2.5L3.8 5.1L1.5 6.2L2.8 8.5L1.5 10.8L3.8 11.9L4 14.5L6.5 13.8L8 16L9.5 13.8L12 14.5L12.2 11.9L14.5 10.8L13.2 8.5L14.5 6.2L12.2 5.1L12 2.5L9.5 3.2L8 1Z" stroke="currentColor" stroke-width="1" fill="none"/>
+                <circle cx="8" cy="8.5" r="2" stroke="currentColor" stroke-width="1" fill="none"/>
+            </svg>
+            设置
+        </div>
+
+        <div class="settings-group">
+            <label class="settings-label" for="port-input">服务端口</label>
+            <input type="number" id="port-input" class="settings-input" min="1" max="65535" placeholder="3080" />
+        </div>
+
+        <div class="settings-group">
+            <label class="settings-label" for="theme-select">配色</label>
+            <select id="theme-select" class="settings-select">
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+            </select>
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-row">
+            <span class="label">版本信息</span>
+            <span class="value" id="version-text">v1.0.1</span>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">检查更新</span>
+            <button id="btn-check-update" class="btn">
+                <svg viewBox="0 0 14 14" fill="none"><path d="M2 7C2 4.2 4.2 2 7 2C9.8 2 12 4.2 12 7M12 7L10 5M12 7L14 5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M12 7C12 9.8 9.8 12 7 12C4.2 12 2 9.8 2 7M2 7L4 9M2 7L0 9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                检查
+            </button>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">Node.js</span>
+            <button id="btn-open-nodejs" class="link-btn">
+                nodejs.org
+                <svg viewBox="0 0 12 12" fill="none"><path d="M4 2H10V8M10 2L3 9M10 2H2V10H10V6" stroke="currentColor" stroke-width="0.8" fill="none" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">项目主页</span>
+            <button id="btn-open-github" class="link-btn">
+                GitHub
+                <svg viewBox="0 0 12 12" fill="none"><path d="M4 2H10V8M10 2L3 9M10 2H2V10H10V6" stroke="currentColor" stroke-width="0.8" fill="none" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">日志文件夹</span>
+            <button id="btn-open-log-folder" class="btn">
+                <svg viewBox="0 0 14 14" fill="none"><path d="M2 3.5C2 2.9 2.4 2.5 3 2.5H5L6 3.5H11C11.6 3.5 12 3.9 12 4.5V10.5C12 11.1 11.6 11.5 11 11.5H3C2.4 11.5 2 11.1 2 10.5V3.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                打开
+            </button>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">安装目录</span>
+            <button id="btn-open-install-dir" class="btn">
+                <svg viewBox="0 0 14 14" fill="none"><path d="M2 3.5C2 2.9 2.4 2.5 3 2.5H5L6 3.5H11C11.6 3.5 12 3.9 12 4.5V10.5C12 11.1 11.6 11.5 11 11.5H3C2.4 11.5 2 11.1 2 10.5V3.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                打开
+            </button>
+        </div>
+
+        <div class="settings-actions">
+            <button id="btn-save" class="btn btn-primary">保存</button>
+        </div>
+    </div>
+
+    <script type="module" src="/src/settings/main.ts"></script>
+</body>
+</html>

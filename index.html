@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepseekHarness</title>
+    <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+    <!-- 标题栏 -->
+    <div class="titlebar" data-tauri-drag-region>
+        <div class="titlebar-title">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 1L2 4V8C2 11.3 4.4 14.4 8 15C11.6 14.4 14 11.3 14 8V4L8 1Z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                <path d="M5.5 8L7 9.5L10.5 6" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>DeepseekHarness</span>
+        </div>
+        <div class="titlebar-controls">
+            <button id="btn-minimize" class="win-btn" title="最小化">
+                <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" stroke-width="1"/></svg>
+            </button>
+            <button id="btn-maximize" class="win-btn" title="最大化">
+                <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+            </button>
+            <button id="btn-close" class="win-btn close" title="关闭">
+                <svg viewBox="0 0 12 12"><line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke="currentColor" stroke-width="1"/><line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke="currentColor" stroke-width="1"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- 加载态：终端日志 -->
+    <div id="loading-view" class="loading-view">
+        <div class="loading-title">程序启动中</div>
+        <div class="loading-spinner"></div>
+        <div class="terminal-box">
+            <div class="terminal-header">
+                <svg viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="1" stroke="currentColor" stroke-width="0.8"/><path d="M3 5L5 7L9 3" stroke="currentColor" stroke-width="0.8" fill="none"/></svg>
+                <span>npx @deepseek-ai/dsh web</span>
+            </div>
+            <div id="terminal-body" class="terminal-body"></div>
+        </div>
+    </div>
+
+    <!-- WebView 态：服务就绪后显示 -->
+    <div id="webview-view" class="webview-view hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
