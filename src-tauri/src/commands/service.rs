@@ -166,6 +166,55 @@ pub async fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
+/// 端口探测结果
+#[derive(Debug, PartialEq, Eq)]
+pub enum PortProbe {
+    /// 端口空闲，可以直接启动服务
+    Free,
+    /// 端口上已有 HTTP 服务在运行（如之前启动的 dsh），直接复用
+    ServiceRunning,
+    /// 端口被其他非服务程序占用，需要切换到下一个可用端口
+    OccupiedByOther,
+}
+
+/// 探测指定端口上是否已有可用的 HTTP 服务。
+/// 能建立 TCP 连接且收到 HTTP 响应头，即认为已有服务在运行；
+/// 能连接但没有 HTTP 响应，判定为被其他程序占用；
+/// 无法连接，判定为空闲。
+pub async fn probe_port(port: u16) -> PortProbe {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let addr = format!("127.0.0.1:{}", port);
+    let connect = tokio::time::timeout(
+        Duration::from_secs(1),
+        tokio::net::TcpStream::connect(&addr),
+    )
+    .await;
+    let Ok(connect_result) = connect else {
+        return PortProbe::Free;
+    };
+    let Ok(mut stream) = connect_result else {
+        return PortProbe::Free;
+    };
+
+    let request = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    let _ = stream.write_all(request.as_bytes()).await;
+
+    let mut buf = [0u8; 64];
+    let read = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buf)).await;
+    match read {
+        Ok(Ok(n)) if n > 0 => {
+            let head = String::from_utf8_lossy(&buf[..n]).to_uppercase();
+            if head.starts_with("HTTP/") {
+                PortProbe::ServiceRunning
+            } else {
+                PortProbe::OccupiedByOther
+            }
+        }
+        _ => PortProbe::OccupiedByOther,
+    }
+}
+
 pub async fn find_available_port(start_port: u16) -> Result<u16, String> {
     let mut port = start_port;
     for _ in 0..10 {
@@ -346,6 +395,55 @@ pub async fn start_service(
         "INFO",
         &format!("收到启动服务请求 (端口: {})", config.port),
     );
+
+    // 端口上已有服务在运行时，直接接管显示，不重复启动新进程
+    match probe_port(config.port).await {
+        PortProbe::ServiceRunning => {
+            crate::logger::log_to_file(
+                &install_dir,
+                "INFO",
+                &format!(
+                    "检测到端口 {} 已有服务在运行，直接使用现有服务",
+                    config.port
+                ),
+            );
+            let _ = app_handle.emit_all("service-log", format!(
+                "[系统] 检测到端口 {} 已有服务在运行，直接使用现有服务，不再重复启动",
+                config.port
+            ));
+
+            let status_manager = app_handle.state::<ServiceManager>();
+            status_manager.reset_restart_count().await;
+            status_manager.is_restarting.store(false, Ordering::SeqCst);
+            {
+                let mut status = status_manager.status.lock().await;
+                status.running = true;
+                status.port = config.port;
+                status.url = format!("http://127.0.0.1:{}", config.port);
+                let _ = app_handle.emit_all("service-status", status.clone());
+            }
+            let url = format!("http://127.0.0.1:{}", config.port);
+            let _ = app_handle.emit_all("service-ready", url);
+            let _ = app_handle.emit_all(
+                "service-log",
+                "[系统] 服务已就绪（复用现有服务）".to_string(),
+            );
+            crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪（复用现有服务）");
+            return Ok(());
+        }
+        PortProbe::OccupiedByOther => {
+            crate::logger::log_to_file(
+                &install_dir,
+                "WARN",
+                &format!(
+                    "端口 {} 已被其他程序占用（无 HTTP 服务），尝试切换端口",
+                    config.port
+                ),
+            );
+        }
+        PortProbe::Free => {}
+    }
+
     let port = find_available_port(config.port).await?;
     crate::logger::log_to_file(&install_dir, "INFO", &format!("端口检测完成: {}", port));
 
@@ -730,6 +828,7 @@ pub async fn stop_service(app_handle: AppHandle) -> Result<(), String> {
     status_manager.is_restarting.store(true, Ordering::SeqCst);
 
     let mut process = status_manager.process.lock().await;
+    let has_owned_process = process.is_some();
     if let Some(mut child) = process.take() {
         let pid = child.id();
         // Windows 下用 taskkill /T 杀掉整个进程树
@@ -756,8 +855,21 @@ pub async fn stop_service(app_handle: AppHandle) -> Result<(), String> {
         let _ = app_handle.emit_all("service-status", status.clone());
     }
 
-    let _ = app_handle.emit_all("service-log", "[系统] 服务已停止".to_string());
-    crate::logger::log_to_file(&get_install_dir(), "INFO", "服务已停止");
+    let message = if has_owned_process {
+        "[系统] 服务已停止".to_string()
+    } else {
+        "[系统] 未检测到本程序启动的服务（端口上的外部服务不受本程序管理）".to_string()
+    };
+    let _ = app_handle.emit_all("service-log", message.clone());
+    crate::logger::log_to_file(
+        &get_install_dir(),
+        if has_owned_process { "INFO" } else { "WARN" },
+        if has_owned_process {
+            "服务已停止"
+        } else {
+            "停止请求忽略：未检测到本程序启动的服务进程"
+        },
+    );
     Ok(())
 }
 
