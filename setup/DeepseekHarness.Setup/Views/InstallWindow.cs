@@ -152,7 +152,7 @@ public class InstallWindow : WindowBase
         }
     }
 
-    private static string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.1";
+    private static string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.3";
 
     private void SetDefaultInstallFolder()
     {

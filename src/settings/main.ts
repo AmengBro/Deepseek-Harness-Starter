@@ -127,7 +127,7 @@ async function init(): Promise<void> {
 
     // 打开 GitHub 项目主页
     btnOpenGithub.addEventListener("click", async () => {
-        await api.openUrl("https://github.com/AmengBro/DeepseekHarness");
+        await api.openUrl("https://github.com/AmengBro/Deepseek-Harness-Starter");
     });
 }
 

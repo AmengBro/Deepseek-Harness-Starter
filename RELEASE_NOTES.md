@@ -1,4 +1,4 @@
-# DeepseekHarness v1.0.1 发行说明
+# DeepseekHarness v1.0.3 发行说明
 
 首个开源发布（[GPL-3.0](LICENSE)）。DeepseekHarness 是一个基于 Tauri 的轻量级桌面启动器：自动检测 Node.js、一键启动 DeepSeek Harness 本地 Web 服务，并在内嵌 WebView 中展示服务界面。
 
@@ -26,8 +26,8 @@
 
 ## 🧰 安装包
 
-- **MewUI 安装器**（推荐）：`DeepseekHarness.Setup-1.0.1-win-x64.exe`（单文件自包含，免管理员）
-- **NSIS 安装器**：`DeepseekHarness_1.0.1_x64-setup.exe`（Tauri 官方打包，体积更小）
+- **MewUI 安装器**（推荐）：`DeepseekHarness.Setup-1.0.3-win-x64.exe`（单文件自包含，免管理员）
+- **NSIS 安装器**：`DeepseekHarness_1.0.3_x64-setup.exe`（Tauri 官方打包，体积更小）
 
 ## 系统要求
 
