@@ -10,6 +10,10 @@ use tauri::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if !ensure_single_instance() {
+        std::process::exit(0);
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let install_dir = get_install_dir();
@@ -108,6 +112,53 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 单实例保护：
+/// - Windows：通过命名互斥体检测是否已有实例在运行；若有，唤起其主窗口后本实例退出。
+/// - 其他平台：暂不限制（当前发布目标为 Windows）。
+fn ensure_single_instance() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        };
+
+        let name: Vec<u16> = "Local\\DeepseekHarness_SingleInstance"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // 句柄故意不关闭：进程存活期间保持互斥体存在，进程退出时由系统回收
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if handle == 0 {
+            // 创建失败时保守处理：不阻止启动
+            return true;
+        }
+
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            // 已有实例在运行：唤起其主窗口，然后退出本实例
+            let class: Vec<u16> = "Tauri"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let title: Vec<u16> = "DeepseekHarness"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let hwnd = unsafe { FindWindowW(class.as_ptr(), title.as_ptr()) } as isize;
+            if hwnd != 0 {
+                unsafe {
+                    ShowWindow(hwnd as _, SW_RESTORE);
+                    SetForegroundWindow(hwnd as _);
+                }
+            }
+            return false;
+        }
+    }
+
+    true
 }
 
 fn open_settings_inner(app_handle: &tauri::AppHandle) -> tauri::Result<()> {
