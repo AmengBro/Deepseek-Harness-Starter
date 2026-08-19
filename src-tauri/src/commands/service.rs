@@ -234,12 +234,12 @@ fn spawn_dsh_process(install_dir: &PathBuf, port: u16) -> Result<Child, String> 
     #[cfg(target_os = "windows")]
     let mut cmd = Command::new("cmd");
     #[cfg(target_os = "windows")]
-    cmd.args(["/c", "npx", "--yes", "@deepseek-ai/dsh", "web"]);
+    cmd.args(["/c", "npx", "--yes", "@deepseek-ai/dsh@latest", "web"]);
 
     #[cfg(not(target_os = "windows"))]
     let mut cmd = Command::new("npx");
     #[cfg(not(target_os = "windows"))]
-    cmd.arg("@deepseek-ai/dsh").arg("web");
+    cmd.arg("@deepseek-ai/dsh@latest").arg("web");
 
     cmd.env("PORT", port.to_string())
         .current_dir(install_dir)
@@ -341,14 +341,14 @@ async fn run_npm_install(
     let mut cmd = Command::new("cmd");
     #[cfg(target_os = "windows")]
     cmd.args([
-        "/c", "npm", "install", "-g", "@deepseek-ai/dsh",
+        "/c", "npm", "install", "-g", "@deepseek-ai/dsh@latest",
         "--verbose", "--no-audit", "--no-fund",
     ]);
 
     #[cfg(not(target_os = "windows"))]
     let mut cmd = Command::new("npm");
     #[cfg(not(target_os = "windows"))]
-    cmd.args(["install", "-g", "@deepseek-ai/dsh", "--verbose", "--no-audit", "--no-fund"]);
+    cmd.args(["install", "-g", "@deepseek-ai/dsh@latest", "--verbose", "--no-audit", "--no-fund"]);
 
     cmd.current_dir(install_dir)
         .stdout(Stdio::piped())

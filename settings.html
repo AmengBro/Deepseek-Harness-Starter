@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="/src/style.css" />
     <style>
         body { overflow: auto; user-select: text; }
+        .settings-title-sm { font-size: 13px; font-weight: 600; margin: 14px 0 6px; opacity: 0.85; }
+        .settings-log { margin-top: 8px; max-height: 150px; overflow: auto; font-family: monospace; font-size: 11px; background: rgba(127,127,127,0.12); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-all; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -37,7 +39,7 @@
 
         <div class="settings-row">
             <span class="label">版本信息</span>
-            <span class="value" id="version-text">v1.0.3</span>
+            <span class="value" id="version-text">检测中...</span>
         </div>
 
         <div class="settings-row">
@@ -79,6 +81,34 @@
                 打开
             </button>
         </div>
+
+        <div class="settings-divider"></div>
+
+        <div class="settings-title-sm">DeepSeek Harness (dsh) 内核</div>
+
+        <div class="settings-row">
+            <span class="label">当前版本</span>
+            <span class="value" id="dsh-current">检测中...</span>
+        </div>
+        <div class="settings-row">
+            <span class="label">最新版本</span>
+            <span class="value" id="dsh-latest">-</span>
+        </div>
+        <div class="settings-row">
+            <span class="label">状态</span>
+            <span class="value" id="dsh-status">-</span>
+        </div>
+
+        <div class="settings-row">
+            <span class="label">检查 dsh 更新</span>
+            <button id="btn-check-dsh" class="btn">检查</button>
+        </div>
+        <div class="settings-row">
+            <span class="label">更新 dsh</span>
+            <button id="btn-update-dsh" class="btn">更新</button>
+        </div>
+
+        <div class="settings-log" id="dsh-update-log" style="display:none;"></div>
 
         <div class="settings-actions">
             <button id="btn-save" class="btn btn-primary">保存</button>

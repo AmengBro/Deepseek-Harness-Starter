@@ -1,8 +1,17 @@
 import { TauriApi, AppConfig } from "../services/tauri-api";
+import { getVersion } from "@tauri-apps/api/app";
 
 const api = new TauriApi();
 
 async function init(): Promise<void> {
+    // 动态显示版本号（取自 tauri.conf.json，避免硬编码漂移导致与检查更新对不上）
+    const versionText = document.getElementById("version-text") as HTMLSpanElement;
+    try {
+        versionText.textContent = "v" + (await getVersion());
+    } catch {
+        versionText.textContent = "未知";
+    }
+
     const portInput = document.getElementById("port-input") as HTMLInputElement;
     const themeSelect = document.getElementById("theme-select") as HTMLSelectElement;
     const btnSave = document.getElementById("btn-save") as HTMLButtonElement;
@@ -11,6 +20,12 @@ async function init(): Promise<void> {
     const btnOpenGithub = document.getElementById("btn-open-github") as HTMLButtonElement;
     const btnOpenLogFolder = document.getElementById("btn-open-log-folder") as HTMLButtonElement;
     const btnOpenInstallDir = document.getElementById("btn-open-install-dir") as HTMLButtonElement;
+    const btnCheckDsh = document.getElementById("btn-check-dsh") as HTMLButtonElement;
+    const btnUpdateDsh = document.getElementById("btn-update-dsh") as HTMLButtonElement;
+    const dshCurrent = document.getElementById("dsh-current") as HTMLSpanElement;
+    const dshLatest = document.getElementById("dsh-latest") as HTMLSpanElement;
+    const dshStatus = document.getElementById("dsh-status") as HTMLSpanElement;
+    const dshUpdateLog = document.getElementById("dsh-update-log") as HTMLDivElement;
 
     let currentConfig: AppConfig = { port: 3080, theme: "system" };
 
@@ -99,7 +114,7 @@ async function init(): Promise<void> {
         }
     });
 
-    // 检查更新
+    // 检查更新（壳程序自身）
     btnCheckUpdate.addEventListener("click", async () => {
         btnCheckUpdate.disabled = true;
         const originalText = btnCheckUpdate.innerHTML;
@@ -119,6 +134,66 @@ async function init(): Promise<void> {
             btnCheckUpdate.innerHTML = originalText;
         }
     });
+
+    // ---- DeepSeek Harness (dsh) 自动更新 ----
+    const refreshDshInfo = async (): Promise<void> => {
+        try {
+            const info = await api.checkDshVersion();
+            dshCurrent.textContent = info.current;
+            dshLatest.textContent = info.latest;
+            if (info.latest === "unknown") {
+                dshStatus.textContent = "检测失败";
+            } else if (info.needs_update) {
+                dshStatus.textContent = "有更新可用";
+            } else {
+                dshStatus.textContent = "已是最新";
+            }
+        } catch {
+            dshStatus.textContent = "检测失败";
+        }
+    };
+
+    // 实时回流 dsh 更新日志
+    await api.onDshUpdateLog((log: string) => {
+        dshUpdateLog.style.display = "block";
+        dshUpdateLog.textContent += log + "\n";
+        dshUpdateLog.scrollTop = dshUpdateLog.scrollHeight;
+    });
+
+    btnCheckDsh.addEventListener("click", async () => {
+        btnCheckDsh.disabled = true;
+        const original = btnCheckDsh.textContent;
+        btnCheckDsh.textContent = "检查中...";
+        try {
+            await refreshDshInfo();
+        } finally {
+            btnCheckDsh.disabled = false;
+            btnCheckDsh.textContent = original;
+        }
+    });
+
+    btnUpdateDsh.addEventListener("click", async () => {
+        if (!confirm("确定将 dsh 更新到最新版？更新后建议重启 DeepSeek Harness 服务以生效。")) {
+            return;
+        }
+        btnUpdateDsh.disabled = true;
+        btnCheckDsh.disabled = true;
+        dshUpdateLog.style.display = "block";
+        dshUpdateLog.textContent = "";
+        try {
+            const newVer = await api.updateDsh();
+            alert(`dsh 已更新至 ${newVer}，建议重启 DeepSeek Harness 服务以生效。`);
+            await refreshDshInfo();
+        } catch (err) {
+            alert(`更新失败: ${err}`);
+        } finally {
+            btnUpdateDsh.disabled = false;
+            btnCheckDsh.disabled = false;
+        }
+    });
+
+    // 进入设置时自动检测一次 dsh 版本
+    refreshDshInfo();
 
     // 打开 Node.js 官网
     btnOpenNodejs.addEventListener("click", async () => {

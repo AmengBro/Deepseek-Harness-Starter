@@ -1,3 +1,32 @@
+# DeepseekHarness 发行说明
+
+## v1.1.0
+
+### 🆕 新增
+
+- **dsh 内核自动更新**：设置窗口新增「dsh 内核」区块，一键检查 / 更新 dsh 到 npm latest（`npm install -g @deepseek-ai/dsh@latest`），安装日志实时滚动。
+- **托盘菜单「管理」子菜单**：整合「打开 Skills 文件夹」「设置」「打开安装目录」「打开日志目录」四项入口。
+- **强化单实例防双开**：第二个进程不再静默退出，必定把已有窗口置顶到前台。
+
+### 🐛 修复
+
+- **检查更新 API repo 名错误**（关键）：`update.rs` 写成了不存在的 `deepseek-harness`，导致 v1.0.3 的检查更新一直 404、永远检测不到新版本。现已修正为真实仓库 `AmengBro/Deepseek-Harness-Starter`。
+- **设置界面版本号硬编码漂移**：现在运行时由 `getVersion()` 从 `tauri.conf.json` 动态读取，与检查更新同源。
+- **dsh 版本漂移**：`spawn_dsh_process` 启动命令改为 `@deepseek-ai/dsh@latest`，避免 npx 缓存锁旧版 dsh。
+- **Cargo.toml 版本号遗漏**：之前 1.0.3 → 1.1.0 升级时漏改，这次同步到 1.1.0。
+
+### 🔧 重构
+
+- 启动器壳程序版本号（设置界面显示 + 检查更新比较）统一以 `tauri.conf.json` 为唯一真相源。
+- C# MewUI 安装器项目版本号同步升至 1.1.0。
+
+### ⚠️ 升级提示
+
+- 由于 v1.0.3 的检查更新 API 地址错误，**v1.0.3 无法自动升级到 v1.1.0**，请从 GitHub Releases 页面手动下载安装包。
+- v1.1.0 及之后即可正常接收自动更新。
+
+---
+
 # DeepseekHarness v1.0.3 发行说明
 
 首个开源发布（[GPL-3.0](LICENSE)）。DeepseekHarness 是一个基于 Tauri 的轻量级桌面启动器：自动检测 Node.js、一键启动 DeepSeek Harness 本地 Web 服务，并在内嵌 WebView 中展示服务界面。

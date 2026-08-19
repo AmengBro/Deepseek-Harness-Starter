@@ -20,6 +20,13 @@ export interface ReleaseInfo {
     published_at?: string;
 }
 
+export interface DshVersionInfo {
+    current: string;
+    latest: string;
+    needs_update: boolean;
+    source: string;
+}
+
 export class TauriApi {
     private listeners: UnlistenFn[] = [];
 
@@ -49,6 +56,14 @@ export class TauriApi {
 
     async checkForUpdates(): Promise<ReleaseInfo | null> {
         return invoke<ReleaseInfo | null>("check_for_updates");
+    }
+
+    async checkDshVersion(): Promise<DshVersionInfo> {
+        return invoke<DshVersionInfo>("check_dsh_version");
+    }
+
+    async updateDsh(): Promise<string> {
+        return invoke<string>("update_dsh");
     }
 
     async openSettings(): Promise<void> {
@@ -113,6 +128,13 @@ export class TauriApi {
 
     async onUpdateAvailable(callback: (info: ReleaseInfo) => void): Promise<void> {
         const unlisten = await listen<ReleaseInfo>("update-available", (event) => {
+            callback(event.payload);
+        });
+        this.listeners.push(unlisten);
+    }
+
+    async onDshUpdateLog(callback: (log: string) => void): Promise<void> {
+        const unlisten = await listen<string>("dsh-update-log", (event) => {
             callback(event.payload);
         });
         this.listeners.push(unlisten);

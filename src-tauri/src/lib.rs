@@ -4,8 +4,8 @@ mod logger;
 use commands::service::{get_install_dir, ServiceManager};
 use commands::config::AppConfig;
 use tauri::{
-    CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
-    SystemTrayMenuItem,
+    api::path::home_dir, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
+    SystemTrayMenuItem, SystemTraySubmenu,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,7 +41,20 @@ pub fn run() {
                 .with_menu(
                     SystemTrayMenu::new()
                         .add_item(CustomMenuItem::new("open".to_string(), "打开主界面"))
-                        .add_item(CustomMenuItem::new("settings".to_string(), "设置"))
+                        .add_submenu(SystemTraySubmenu::new(
+                            "管理",
+                            SystemTrayMenu::new()
+                                .add_item(CustomMenuItem::new(
+                                    "skills".to_string(),
+                                    "打开 Skills 文件夹",
+                                ))
+                                .add_item(CustomMenuItem::new("settings".to_string(), "设置"))
+                                .add_item(CustomMenuItem::new(
+                                    "install_dir".to_string(),
+                                    "打开安装目录",
+                                ))
+                                .add_item(CustomMenuItem::new("log".to_string(), "打开日志目录")),
+                        ))
                         .add_native_item(SystemTrayMenuItem::Separator)
                         .add_item(CustomMenuItem::new("quit".to_string(), "退出 Harness")),
                 ),
@@ -76,6 +89,33 @@ pub fn run() {
                                 );
                             }
                         }
+                        "skills" => {
+                            if let Err(e) = open_skills_folder() {
+                                logger::log_to_file(
+                                    &get_install_dir(),
+                                    "ERROR",
+                                    &format!("打开 Skills 文件夹失败: {}", e),
+                                );
+                            }
+                        }
+                        "install_dir" => {
+                            if let Err(e) = open_install_dir() {
+                                logger::log_to_file(
+                                    &get_install_dir(),
+                                    "ERROR",
+                                    &format!("打开安装目录失败: {}", e),
+                                );
+                            }
+                        }
+                        "log" => {
+                            if let Err(e) = open_log_folder() {
+                                logger::log_to_file(
+                                    &get_install_dir(),
+                                    "ERROR",
+                                    &format!("打开日志目录失败: {}", e),
+                                );
+                            }
+                        }
                         "quit" => {
                             // 退出前先杀掉服务进程
                             if let Some(state) = app.try_state::<ServiceManager>() {
@@ -106,25 +146,26 @@ pub fn run() {
             commands::service::get_service_status,
             commands::service::check_nodejs,
             commands::update::check_for_updates,
+            commands::dsh::check_dsh_version,
+            commands::dsh::update_dsh,
             open_settings_window,
             open_log_folder,
             open_install_dir,
+            open_skills_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 /// 单实例保护：
-/// - Windows：通过命名互斥体检测是否已有实例在运行；若有，唤起其主窗口后本实例退出。
+/// - Windows：通过命名互斥体检测是否已有实例在运行；若有，把已有实例的主窗口
+///   恢复到前台（而非静默退出），再让本实例退出。
 /// - 其他平台：暂不限制（当前发布目标为 Windows）。
 fn ensure_single_instance() -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
         use windows_sys::Win32::System::Threading::CreateMutexW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
-        };
 
         let name: Vec<u16> = "Local\\DeepseekHarness_SingleInstance"
             .encode_utf16()
@@ -138,27 +179,67 @@ fn ensure_single_instance() -> bool {
         }
 
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-            // 已有实例在运行：唤起其主窗口，然后退出本实例
-            let class: Vec<u16> = "Tauri"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-            let title: Vec<u16> = "DeepseekHarness"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-            let hwnd = unsafe { FindWindowW(class.as_ptr(), title.as_ptr()) } as isize;
-            if hwnd != 0 {
-                unsafe {
-                    ShowWindow(hwnd as _, SW_RESTORE);
-                    SetForegroundWindow(hwnd as _);
-                }
-            }
+            // 已有实例在运行：把其主窗口恢复到前台，然后退出本实例（不静默）
+            bring_existing_to_front();
             return false;
         }
     }
 
     true
+}
+
+/// 通过枚举顶层窗口，按标题精确匹配 "DeepseekHarness" 找到已运行实例的主窗口，
+/// 并用 AttachThreadInput + SetForegroundWindow 稳定地将其恢复到前台（绕开系统对置顶的限制）。
+#[cfg(target_os = "windows")]
+fn bring_existing_to_front() {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetForegroundWindow,
+        ShowWindowAsync, SW_RESTORE,
+    };
+
+    struct FindCtx {
+        target: Vec<u16>,
+        found: isize,
+    }
+
+    unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: isize) -> i32 {
+        let ctx = &mut *(lparam as *mut FindCtx);
+        let mut buf = [0u16; 256];
+        let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len > 0 && &buf[..len as usize] == ctx.target.as_slice() {
+            ctx.found = hwnd as isize;
+            0 // 命中即停止枚举
+        } else {
+            1
+        }
+    }
+
+    let target: Vec<u16> = "DeepseekHarness".encode_utf16().collect();
+    let mut ctx = FindCtx { target, found: 0 };
+    unsafe {
+        EnumWindows(Some(enum_cb), &mut ctx as *mut FindCtx as isize);
+    }
+
+    if ctx.found == 0 {
+        return; // 没找到窗口，保守退出
+    }
+
+    unsafe {
+        // 若窗口被最小化/隐藏，先恢复并展示
+        ShowWindowAsync(ctx.found as HWND, SW_RESTORE);
+        // 跨线程置顶：AttachThreadInput 可绕开系统对 SetForegroundWindow 的限制
+        let curr = GetCurrentThreadId();
+        let target_thread = GetWindowThreadProcessId(ctx.found as HWND, std::ptr::null_mut());
+        if target_thread != 0 && target_thread != curr {
+            let _ = AttachThreadInput(curr, target_thread, 1);
+        }
+        let _ = SetForegroundWindow(ctx.found as HWND);
+        if target_thread != 0 && target_thread != curr {
+            let _ = AttachThreadInput(curr, target_thread, 0);
+        }
+    }
 }
 
 fn open_settings_inner(app_handle: &tauri::AppHandle) -> tauri::Result<()> {
@@ -229,9 +310,31 @@ fn open_install_dir() -> Result<(), String> {
     {
         let _ = std::process::Command::new("open").arg(&install_dir).spawn();
     }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(&install_dir).spawn();
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&install_dir).spawn();
+        }
+        Ok(())
     }
-    Ok(())
-}
+
+    #[tauri::command]
+    fn open_skills_folder() -> Result<(), String> {
+        // dsh 默认 skills 目录：~/.agents/skills
+        let home = home_dir().ok_or_else(|| "无法确定用户主目录".to_string())?;
+        let skills_dir = home.join(".agents").join("skills");
+        std::fs::create_dir_all(&skills_dir).map_err(|e| format!("创建 skills 目录失败: {}", e))?;
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer").arg(&skills_dir).spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&skills_dir).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&skills_dir).spawn();
+        }
+        Ok(())
+    }

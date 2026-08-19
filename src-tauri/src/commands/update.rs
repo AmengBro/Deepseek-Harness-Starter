@@ -10,8 +10,7 @@ pub struct ReleaseInfo {
 
 const GITHUB_API: &str = "https://api.github.com/repos";
 const REPO_OWNER: &str = "AmengBro";
-const REPO_NAME: &str = "deepseek-harness";
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const REPO_NAME: &str = "Deepseek-Harness-Starter";
 
 #[tauri::command]
 pub async fn check_for_updates(app_handle: AppHandle) -> Result<Option<ReleaseInfo>, String> {
@@ -62,7 +61,7 @@ pub async fn check_for_updates(app_handle: AppHandle) -> Result<Option<ReleaseIn
 
     let release_version = tag_name.trim_start_matches('v').to_string();
 
-    let current = CURRENT_VERSION.to_string();
+    let current = app_handle.package_info().version.to_string();
     let latest = release_version.clone();
 
     if version_greater(&latest, &current) {
