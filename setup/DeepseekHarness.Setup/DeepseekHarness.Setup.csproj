@@ -9,7 +9,7 @@
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <AssemblyName>DeepseekHarness.Setup</AssemblyName>
     <RootNamespace>DeepseekHarness.Setup</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
