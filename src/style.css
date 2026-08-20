@@ -47,6 +47,18 @@ html, body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* 自定义滚动条：让设置窗口在内容溢出时有低调的滚动条（深浅模式都适配） */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: rgba(127, 127, 127, 0.3);
+    border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(127, 127, 127, 0.55); }
+*::-webkit-scrollbar-corner { background: transparent; }
+:root[data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); }
+:root[data-theme="dark"] *::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.35); }
+
 /* ===== 标题栏 ===== */
 
 .titlebar {
@@ -433,3 +445,107 @@ html, body {
 .hidden {
     display: none !important;
 }
+
+/* ===== MCP 管理（已并入设置面板，以下为共享组件样式） ===== */
+
+.mcp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+:root[data-theme="dark"] .mcp-card { box-shadow: none; }
+.mcp-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.9;
+}
+.mcp-card-title svg { width: 13px; height: 13px; opacity: 0.7; }
+
+.mcp-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.mcp-tab-btn {
+    padding: 8px 16px; border: 0; background: transparent; color: var(--fg);
+    cursor: pointer; font-size: 13px; opacity: 0.6;
+    border-bottom: 2px solid transparent; transition: all .15s;
+}
+.mcp-tab-btn:hover { opacity: 1; }
+.mcp-tab-btn.active { opacity: 1; border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+.mcp-tab-panel { display: none; }
+.mcp-tab-panel.active { display: block; }
+
+.mcp-form-row { margin-bottom: 12px; }
+.mcp-form-row label { display: block; font-size: 12px; margin-bottom: 4px; opacity: 0.85; color: var(--fg); }
+.mcp-form-input, .mcp-form-select, .mcp-form-textarea {
+    width: 100%; padding: 8px 10px; box-sizing: border-box; border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; font-family: inherit;
+}
+.mcp-form-input:focus, .mcp-form-select:focus, .mcp-form-textarea:focus {
+    outline: none; border-color: var(--accent);
+}
+.mcp-form-textarea { font-family: var(--mono); resize: vertical; min-height: 96px; }
+.mcp-form-row-inline { display: grid; grid-template-columns: 1fr 160px; gap: 12px; align-items: end; }
+.mcp-hint { font-size: 11px; opacity: 0.55; margin-top: 4px; }
+.mcp-pill {
+    display: inline-block; font-size: 11px; padding: 3px 10px;
+    border-radius: 999px; background: var(--bg);
+    border: 1px solid var(--border);
+    margin-right: 6px; margin-top: 4px;
+}
+.mcp-pill::before { content: "●"; color: var(--terminal-green); margin-right: 4px; }
+.mcp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.mcp-btn-danger { color: var(--danger); border-color: var(--danger); }
+.mcp-btn-danger:hover { background: var(--surface-hover); }
+
+.mcp-config-path {
+    font-family: var(--mono); font-size: 11px; opacity: 0.7;
+    padding: 8px 12px; background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px; word-break: break-all;
+}
+.mcp-server-list { list-style: none; padding: 0; margin: 0; }
+.mcp-server-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; margin-bottom: 4px; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--border);
+    font-size: 12px;
+}
+.mcp-server-name { font-weight: 600; margin-right: 8px; color: var(--fg); }
+.mcp-server-meta { opacity: 0.65; font-family: var(--mono); font-size: 11px; word-break: break-all; }
+.mcp-empty { text-align: center; opacity: 0.4; padding: 12px; font-size: 12px; }
+
+/* ===== 轻量 Toast 反馈（替代原生 alert/confirm，确保 Tauri 下必有反馈） ===== */
+.toast {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    z-index: 9999;
+    max-width: 92%;
+    box-sizing: border-box;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s, transform .2s;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { border-color: var(--terminal-green); }
+.toast.error { border-color: var(--danger); color: var(--danger); }

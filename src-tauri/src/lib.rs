@@ -5,7 +5,7 @@ use commands::service::{get_install_dir, ServiceManager};
 use commands::config::AppConfig;
 use tauri::{
     api::path::home_dir, CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu,
-    SystemTrayMenuItem, SystemTraySubmenu,
+    SystemTrayMenuItem,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,20 +41,7 @@ pub fn run() {
                 .with_menu(
                     SystemTrayMenu::new()
                         .add_item(CustomMenuItem::new("open".to_string(), "打开主界面"))
-                        .add_submenu(SystemTraySubmenu::new(
-                            "管理",
-                            SystemTrayMenu::new()
-                                .add_item(CustomMenuItem::new(
-                                    "skills".to_string(),
-                                    "打开 Skills 文件夹",
-                                ))
-                                .add_item(CustomMenuItem::new("settings".to_string(), "设置"))
-                                .add_item(CustomMenuItem::new(
-                                    "install_dir".to_string(),
-                                    "打开安装目录",
-                                ))
-                                .add_item(CustomMenuItem::new("log".to_string(), "打开日志目录")),
-                        ))
+                        .add_item(CustomMenuItem::new("settings".to_string(), "设置"))
                         .add_native_item(SystemTrayMenuItem::Separator)
                         .add_item(CustomMenuItem::new("quit".to_string(), "退出 Harness")),
                 ),
@@ -86,33 +73,6 @@ pub fn run() {
                                     &get_install_dir(),
                                     "ERROR",
                                     &format!("打开设置窗口失败: {}", e),
-                                );
-                            }
-                        }
-                        "skills" => {
-                            if let Err(e) = open_skills_folder() {
-                                logger::log_to_file(
-                                    &get_install_dir(),
-                                    "ERROR",
-                                    &format!("打开 Skills 文件夹失败: {}", e),
-                                );
-                            }
-                        }
-                        "install_dir" => {
-                            if let Err(e) = open_install_dir() {
-                                logger::log_to_file(
-                                    &get_install_dir(),
-                                    "ERROR",
-                                    &format!("打开安装目录失败: {}", e),
-                                );
-                            }
-                        }
-                        "log" => {
-                            if let Err(e) = open_log_folder() {
-                                logger::log_to_file(
-                                    &get_install_dir(),
-                                    "ERROR",
-                                    &format!("打开日志目录失败: {}", e),
                                 );
                             }
                         }
@@ -152,6 +112,15 @@ pub fn run() {
             open_log_folder,
             open_install_dir,
             open_skills_folder,
+            commands::mcp::get_mcp_config_path_cmd,
+            commands::mcp::list_mcp_servers,
+            commands::mcp::add_mcp_server,
+            commands::mcp::remove_mcp_server,
+            commands::mcp::open_mcp_config_file,
+            commands::extensions::install_extension,
+            commands::extensions::uninstall_extension,
+            commands::extensions::ensure_deps,
+            commands::extensions::list_extensions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -255,14 +224,16 @@ fn open_settings_inner(app_handle: &tauri::AppHandle) -> tauri::Result<()> {
 
     logger::log_to_file(&install_dir, "INFO", "正在创建设置窗口...");
 
-    // 创建新设置窗口
+    // 创建新设置窗口（给新加的 dsh 内核/管理区块留足高度，并加自定义滚动条配合）
     let _window = tauri::WindowBuilder::new(
         app_handle,
         "settings",
         tauri::WindowUrl::App("settings.html".into()),
     )
-    .title("DeepseekHarness 设置")
-    .inner_size(500.0, 450.0)
+        .title("DeepseekHarness 设置")
+        .inner_size(640.0, 760.0)
+        .min_inner_size(480.0, 540.0)
+    .resizable(true)
     .center()
     .decorations(true)
     .visible(true)
@@ -273,8 +244,33 @@ fn open_settings_inner(app_handle: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 #[tauri::command]
-fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    open_settings_inner(&app_handle).map_err(|e| format!("{}", e))
+async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    build_window_on_main_thread(&app_handle, |handle| open_settings_inner(handle)).await
+}
+
+/// 将窗口创建调度回主线程执行（async 版本）。
+/// 关键：tauri 的 WindowBuilder::build() 创建 WebView2 窗口**必须在主线程**执行。
+/// - 若从 IPC 线程（同步 command）直接调用 build() → 挂起（白屏无元素、invoke 永不返回）
+/// - 若在同步 command 里用 run_on_main_thread + 阻塞 recv → 主线程死锁，**所有窗口卡死**
+/// 正确做法：command 必须 async（在 tokio 线程执行），run_on_main_thread 投递闭包后
+/// 用 oneshot channel **await**（不阻塞任何线程）。
+async fn build_window_on_main_thread<F>(
+    app_handle: &tauri::AppHandle,
+    build: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&tauri::AppHandle) -> tauri::Result<()> + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let handle = app_handle.clone();
+    app_handle
+        .run_on_main_thread(move || {
+            let result = build(&handle).map_err(|e| format!("{}", e));
+            let _ = tx.send(result);
+        })
+        .map_err(|e| format!("调度主线程失败: {}", e))?;
+    rx.await
+        .map_err(|e| format!("窗口创建结果接收失败: {}", e))?
 }
 
 #[tauri::command]
@@ -338,3 +334,5 @@ fn open_install_dir() -> Result<(), String> {
         }
         Ok(())
     }
+
+    // MCP 管理已并入设置窗口（settings.html 的 MCP 导航面板），独立窗口已移除。

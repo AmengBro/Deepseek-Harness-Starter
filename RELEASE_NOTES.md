@@ -1,5 +1,26 @@
 # DeepseekHarness 发行说明
 
+## v1.2.0
+
+### 🆕 新增
+
+- **扩展（插件）「包名 / URL 添加」入口**：设置窗口新增「插件」标签，支持按 npm 包名（如 `@scope/name`、`github:owner/repo`）或按 URL（`git+https://...`、tarball `.tar.gz`）添加 dsh 扩展；已安装列表可一键卸载。
+- **MCP 管理并入设置窗口**：原独立 MCP 窗口整体移入设置页「MCP」标签，复用更大、可滚动的窗口；新增应用内 Toast 反馈与自定义确认框（替代 Tauri 下不弹窗的原生 `alert`/`confirm`），并补「重启服务生效」按钮以真正加载 MCP / 扩展。
+- **pnpm / git 自动安装**：首次添加扩展时若检测到缺 pnpm 或 git 即自动安装（pnpm 经 `npm install -g`，git 经 `winget`），已有则跳过绝不升级；所有 dsh / pnpm 命令加 `--verbose` / `--loglevel=debug`，日志经独立「安装日志」实时回流。
+
+### 🐛 修复
+
+- **扩展列表数据源修正（关键）**：原 `dsh plugin list --json` 实际返回 workspace 顶层信息、不含已装插件，改为直接读取 profile 的 `package.json` 的 `dependencies`，列表准确反映用户已装扩展。
+- **MCP profile 动态探测**：后端写配置时动态探测当前真实 profile（启动器 `dsh web` → `web`），消除 web / headless 错配。
+- **PATH 注入改为子进程级**：移除 `unsafe std::env::set_var` 全局注入（多线程 UB 风险），改为给 dsh 子进程传增强 PATH，更安全地让 dsh 内部找到 pnpm / git。
+
+### ⚠️ 已知限制
+
+- git 源扩展（`github:` / `git+`）安装时 pnpm 可能拦截 `prepare` 构建脚本，需手动在 `pnpm-workspace.yaml` 的 `allowBuilds` 放行，添加前会弹窗提示。
+- 设置页其它位置（保存 / 更新 / 检查等）仍在使用原生 `alert`，后续可统一替换为 Toast。
+
+---
+
 ## v1.1.0
 
 ### 🆕 新增

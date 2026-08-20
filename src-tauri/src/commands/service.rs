@@ -48,20 +48,30 @@ impl ServiceManager {
     }
 
     /// 同步杀掉服务进程（退出时调用）
+    /// 关键优化：taskkill 改用 spawn 不再等 status，避免在 dsh 复杂进程树（cmd → npx → node → ...）下长时间阻塞
+    /// 整体加 2 秒硬上限，超时就不等了——进程会被系统或 taskkill /F 异步清理
     pub fn kill_service_blocking(&self) {
         self.is_restarting.store(true, Ordering::SeqCst);
         let mut process = self.process.blocking_lock();
         if let Some(mut child) = process.take() {
             let pid = child.id();
-            // Windows 下用 taskkill /T 杀掉整个进程树（cmd.exe → node.exe）
             #[cfg(target_os = "windows")]
             {
+                // 用 spawn 异步发起 taskkill，不 wait status（taskkill /F 在大型进程树上偶尔会卡几秒）
                 let _ = std::process::Command::new("taskkill")
                     .args(["/T", "/F", "/PID", &pid.to_string()])
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status();
-                let _ = child.wait();
+                    .spawn();
+                // 给子进程最多 2 秒时间退出，超时不再等（避免退出很慢）
+                let start = std::time::Instant::now();
+                while start.elapsed() < std::time::Duration::from_secs(2) {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+                    }
+                }
+                // 即使超时也不 wait()——避免 hang 在 av/ntdll 锁
             }
             #[cfg(not(target_os = "windows"))]
             {
@@ -229,17 +239,108 @@ pub async fn find_available_port(start_port: u16) -> Result<u16, String> {
     ))
 }
 
-fn spawn_dsh_process(install_dir: &PathBuf, port: u16) -> Result<Child, String> {
-    // Windows 下通过 cmd /c 启动，确保能找到 npx（GUI 应用 PATH 可能不完整）
-    #[cfg(target_os = "windows")]
-    let mut cmd = Command::new("cmd");
-    #[cfg(target_os = "windows")]
-    cmd.args(["/c", "npx", "--yes", "@deepseek-ai/dsh@latest", "web"]);
+/// npx 启动方式：由于新版 Node.js 只提供 npx.cmd（无 npx.exe），且 npx.cmd 需要 cmd 解释器，
+/// 直接 spawn .cmd 会报 os error 193（不是有效的 Win32 应用程序），还会弹 cmd 黑窗口。
+/// 最稳的方式：找到 node.exe 绝对路径，用它直接运行 npm 自带的 npx-cli.js（无需 cmd，无窗口）。
+pub enum NpxLauncher {
+    /// node.exe + npx-cli.js（Windows 首选）
+    NodeCli(PathBuf, PathBuf),
+    /// 直接可执行文件（有 npx.exe 的老版本 Node，或非 Windows 平台的 npx）
+    Direct(PathBuf),
+}
 
+pub fn find_npx_launcher() -> Option<NpxLauncher> {
+    #[cfg(target_os = "windows")]
+    {
+        // 策略 1：where node → 拿到 node.exe → 推导同目录 node_modules/npm/bin/npx-cli.js
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("node")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if let Some(first) = text
+                    .lines()
+                    .map(|l| l.trim())
+                    .find(|p| p.to_lowercase().ends_with(".exe"))
+                {
+                    let node = PathBuf::from(first);
+                    let cli = node
+                        .parent()?
+                        .join("node_modules")
+                        .join("npm")
+                        .join("bin")
+                        .join("npx-cli.js");
+                    if cli.exists() {
+                        return Some(NpxLauncher::NodeCli(node, cli));
+                    }
+                }
+            }
+        }
+
+        // 策略 2：where npx → 如果有 npx.exe 则直接用
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("npx")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if let Some(exe) = text
+                    .lines()
+                    .map(|l| l.trim())
+                    .find(|p| p.to_lowercase().ends_with(".exe"))
+                {
+                    return Some(NpxLauncher::Direct(PathBuf::from(exe)));
+                }
+            }
+        }
+
+        // 策略 3：常见 Node 安装目录硬编码（node.exe + npx-cli.js 或 npx.exe）
+        for base in [
+            r"D:\nodejs",
+            r"C:\Program Files\nodejs",
+            r"C:\Program Files (x86)\nodejs",
+        ] {
+            let node = PathBuf::from(base).join("node.exe");
+            let cli = PathBuf::from(base)
+                .join("node_modules")
+                .join("npm")
+                .join("bin")
+                .join("npx-cli.js");
+            if node.exists() && cli.exists() {
+                return Some(NpxLauncher::NodeCli(node, cli));
+            }
+            let npx_exe = PathBuf::from(base).join("npx.exe");
+            if npx_exe.exists() {
+                return Some(NpxLauncher::Direct(npx_exe));
+            }
+        }
+    }
     #[cfg(not(target_os = "windows"))]
-    let mut cmd = Command::new("npx");
-    #[cfg(not(target_os = "windows"))]
-    cmd.arg("@deepseek-ai/dsh@latest").arg("web");
+    {
+        // macOS/Linux：直接让 npx 走 PATH
+        return Some(NpxLauncher::Direct(PathBuf::from("npx")));
+    }
+    None
+}
+
+fn spawn_dsh_process(install_dir: &PathBuf, port: u16) -> Result<Child, String> {
+    let launcher = find_npx_launcher().ok_or_else(|| "未找到 npx，请先安装 Node.js".to_string())?;
+
+    // 用 node.exe 直跑 npx-cli.js（无需 cmd /c，彻底消除 cmd 黑窗口闪现，也避免 193 错误）
+    let mut cmd = match launcher {
+        NpxLauncher::NodeCli(node, cli) => {
+            let mut c = Command::new(node);
+            c.arg(cli);
+            c
+        }
+        NpxLauncher::Direct(npx) => Command::new(npx),
+    };
+    cmd.args(["--yes", "@deepseek-ai/dsh@latest", "web"]);
 
     cmd.env("PORT", port.to_string())
         .current_dir(install_dir)
@@ -249,6 +350,7 @@ fn spawn_dsh_process(install_dir: &PathBuf, port: u16) -> Result<Child, String> 
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW(0x08000000): 确保不会创建控制台窗口
         cmd.creation_flags(0x08000000);
     }
 

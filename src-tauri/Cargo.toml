@@ -1,6 +1,6 @@
 [package]
 name = "deepseek-harness"
-version = "1.1.0"
+version = "1.2.0"
 description = "DeepseekHarness - 本地 Web 服务一键启动工具"
 authors = ["AmengBro", "Codex (OpenAI)"]
 edition = "2021"
@@ -48,6 +48,7 @@ toml = "0.8"
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 reqwest = { version = "0.11", features = ["json"] }
+serde_yaml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [

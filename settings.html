@@ -7,114 +7,435 @@
     <link rel="stylesheet" href="/src/style.css" />
     <style>
         body { overflow: auto; user-select: text; }
-        .settings-title-sm { font-size: 13px; font-weight: 600; margin: 14px 0 6px; opacity: 0.85; }
-        .settings-log { margin-top: 8px; max-height: 150px; overflow: auto; font-family: monospace; font-size: 11px; background: rgba(127,127,127,0.12); border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-all; line-height: 1.4; }
+        /* ===== 侧边导航 + 内容面板布局 ===== */
+        .settings-shell {
+            display: flex;
+            min-height: calc(100vh - 20px);
+        }
+
+        /* 左侧导航 */
+        .settings-nav {
+            width: 148px;
+            flex-shrink: 0;
+            padding: 16px 8px;
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--fg);
+            font-size: 13px;
+            font-family: var(--sans);
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.12s;
+        }
+        .nav-item svg { width: 14px; height: 14px; opacity: 0.7; flex-shrink: 0; }
+        .nav-item:hover { background: var(--surface-hover); }
+        .nav-item.active {
+            background: var(--accent);
+            color: var(--accent-fg);
+            font-weight: 600;
+        }
+        .nav-item.active svg { opacity: 1; }
+
+        /* 右侧内容 */
+        .settings-content {
+            flex: 1;
+            padding: 20px 22px 28px;
+            overflow-y: auto;
+        }
+        .settings-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-title svg { width: 17px; height: 17px; }
+
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        /* 面板内卡片 */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        :root[data-theme="dark"] .card { box-shadow: none; }
+        .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            opacity: 0.9;
+        }
+        .card-title svg { width: 13px; height: 13px; opacity: 0.7; }
+
+        .card-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 7px 0;
+            font-size: 13px;
+        }
+        .card-row + .card-row { border-top: 1px solid var(--border); }
+        .card-row .label { color: var(--fg); }
+        .card-row .value {
+            color: var(--fg);
+            opacity: 0.6;
+            font-size: 12px;
+            font-family: var(--mono);
+        }
+        .card-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .settings-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        /* 紧凑输入组（服务端口/配色） */
+        .inline-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .inline-group .settings-label { font-size: 11px; margin-bottom: 4px; opacity: 0.75; }
+        .settings-log { margin-top: 12px; max-height: 150px; overflow: auto; font-family: var(--mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; white-space: pre-wrap; word-break: break-all; line-height: 1.4; }
     </style>
 </head>
 <body>
-    <div class="settings-container">
-        <div class="settings-title">
-            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8 1L6.5 3.2L4 2.5L3.8 5.1L1.5 6.2L2.8 8.5L1.5 10.8L3.8 11.9L4 14.5L6.5 13.8L8 16L9.5 13.8L12 14.5L12.2 11.9L14.5 10.8L13.2 8.5L14.5 6.2L12.2 5.1L12 2.5L9.5 3.2L8 1Z" stroke="currentColor" stroke-width="1" fill="none"/>
-                <circle cx="8" cy="8.5" r="2" stroke="currentColor" stroke-width="1" fill="none"/>
-            </svg>
-            设置
-        </div>
-
-        <div class="settings-group">
-            <label class="settings-label" for="port-input">服务端口</label>
-            <input type="number" id="port-input" class="settings-input" min="1" max="65535" placeholder="3080" />
-        </div>
-
-        <div class="settings-group">
-            <label class="settings-label" for="theme-select">配色</label>
-            <select id="theme-select" class="settings-select">
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-            </select>
-        </div>
-
-        <div class="settings-divider"></div>
-
-        <div class="settings-row">
-            <span class="label">版本信息</span>
-            <span class="value" id="version-text">检测中...</span>
-        </div>
-
-        <div class="settings-row">
-            <span class="label">检查更新</span>
-            <button id="btn-check-update" class="btn">
-                <svg viewBox="0 0 14 14" fill="none"><path d="M2 7C2 4.2 4.2 2 7 2C9.8 2 12 4.2 12 7M12 7L10 5M12 7L14 5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M12 7C12 9.8 9.8 12 7 12C4.2 12 2 9.8 2 7M2 7L4 9M2 7L0 9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
-                检查
-            </button>
-        </div>
-
-        <div class="settings-row">
-            <span class="label">Node.js</span>
-            <button id="btn-open-nodejs" class="link-btn">
-                nodejs.org
-                <svg viewBox="0 0 12 12" fill="none"><path d="M4 2H10V8M10 2L3 9M10 2H2V10H10V6" stroke="currentColor" stroke-width="0.8" fill="none" stroke-linecap="round"/></svg>
-            </button>
-        </div>
-
-        <div class="settings-row">
-            <span class="label">项目主页</span>
-            <button id="btn-open-github" class="link-btn">
-                GitHub
-                <svg viewBox="0 0 12 12" fill="none"><path d="M4 2H10V8M10 2L3 9M10 2H2V10H10V6" stroke="currentColor" stroke-width="0.8" fill="none" stroke-linecap="round"/></svg>
-            </button>
-        </div>
-
-        <div class="settings-row">
-            <span class="label">日志文件夹</span>
-            <button id="btn-open-log-folder" class="btn">
+    <div class="settings-shell">
+        <!-- 左侧导航 -->
+        <aside class="settings-nav">
+            <button class="nav-item active" data-panel="basic">
                 <svg viewBox="0 0 14 14" fill="none"><path d="M2 3.5C2 2.9 2.4 2.5 3 2.5H5L6 3.5H11C11.6 3.5 12 3.9 12 4.5V10.5C12 11.1 11.6 11.5 11 11.5H3C2.4 11.5 2 11.1 2 10.5V3.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
-                打开
+                基本
             </button>
-        </div>
-
-        <div class="settings-row">
-            <span class="label">安装目录</span>
-            <button id="btn-open-install-dir" class="btn">
-                <svg viewBox="0 0 14 14" fill="none"><path d="M2 3.5C2 2.9 2.4 2.5 3 2.5H5L6 3.5H11C11.6 3.5 12 3.9 12 4.5V10.5C12 11.1 11.6 11.5 11 11.5H3C2.4 11.5 2 11.1 2 10.5V3.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
-                打开
+            <button class="nav-item" data-panel="version">
+                <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/></svg>
+                版本
             </button>
-        </div>
+            <button class="nav-item" data-panel="manage">
+                <svg viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1"/><path d="M5 5H9M5 7H9M5 9H8" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                管理
+            </button>
+            <button class="nav-item" data-panel="dsh">
+                <svg viewBox="0 0 14 14" fill="none"><path d="M7 1.5L12 3.5V6.5C12 9.5 9.8 11.8 7 12.5C4.2 11.8 2 9.5 2 6.5V3.5L7 1.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                dsh 内核
+            </button>
+            <button class="nav-item" data-panel="mcp">
+                <svg viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1"/><path d="M5 5H9M5 7H9M5 9H8" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                MCP
+            </button>
+            <button class="nav-item" data-panel="extensions">
+                <svg viewBox="0 0 14 14" fill="none"><path d="M7 1.5L12 3.5V6.5C12 9.5 9.8 11.8 7 12.5C4.2 11.8 2 9.5 2 6.5V3.5L7 1.5Z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+                插件
+            </button>
+        </aside>
 
-        <div class="settings-divider"></div>
+        <!-- 右侧内容 -->
+        <main class="settings-content">
+            <!-- 基本 -->
+            <div class="panel active" data-panel="basic">
+                <div class="settings-title">
+                    <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M8 1L6.5 3.2L4 2.5L3.8 5.1L1.5 6.2L2.8 8.5L1.5 10.8L3.8 11.9L4 14.5L6.5 13.8L8 16L9.5 13.8L12 14.5L12.2 11.9L14.5 10.8L13.2 8.5L14.5 6.2L12.2 5.1L12 2.5L9.5 3.2L8 1Z" stroke="currentColor" stroke-width="1" fill="none"/>
+                        <circle cx="8" cy="8.5" r="2" stroke="currentColor" stroke-width="1" fill="none"/>
+                    </svg>
+                    设置
+                </div>
+                <div class="card">
+                    <div class="inline-group">
+                        <div>
+                            <label class="settings-label" for="port-input">服务端口</label>
+                            <input type="number" id="port-input" class="settings-input" min="1" max="65535" placeholder="3080" />
+                        </div>
+                        <div>
+                            <label class="settings-label" for="theme-select">配色</label>
+                            <select id="theme-select" class="settings-select">
+                                <option value="system">跟随系统</option>
+                                <option value="light">浅色</option>
+                                <option value="dark">深色</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button id="btn-save" class="btn btn-primary">保存</button>
+                </div>
+            </div>
 
-        <div class="settings-title-sm">DeepSeek Harness (dsh) 内核</div>
+            <!-- 版本 -->
+            <div class="panel" data-panel="version">
+                <div class="settings-title">版本</div>
+                <div class="card">
+                    <div class="card-row">
+                        <span class="label">当前版本</span>
+                        <span class="value" id="version-text">检测中...</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">检查更新</span>
+                        <button id="btn-check-update" class="btn">检查</button>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">Node.js</span>
+                        <button id="btn-open-nodejs" class="link-btn">nodejs.org</button>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">项目主页</span>
+                        <button id="btn-open-github" class="link-btn">GitHub</button>
+                    </div>
+                </div>
+            </div>
 
-        <div class="settings-row">
-            <span class="label">当前版本</span>
-            <span class="value" id="dsh-current">检测中...</span>
-        </div>
-        <div class="settings-row">
-            <span class="label">最新版本</span>
-            <span class="value" id="dsh-latest">-</span>
-        </div>
-        <div class="settings-row">
-            <span class="label">状态</span>
-            <span class="value" id="dsh-status">-</span>
-        </div>
+            <!-- 管理 -->
+            <div class="panel" data-panel="manage">
+                <div class="settings-title">管理</div>
+                <div class="card">
+                    <div class="card-row">
+                        <span class="label">Skills 文件夹</span>
+                        <button id="btn-open-skills" class="btn">打开</button>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">日志文件夹</span>
+                        <button id="btn-open-log-folder" class="btn">打开</button>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">安装目录</span>
+                        <button id="btn-open-install-dir" class="btn">打开</button>
+                    </div>
+                </div>
+            </div>
 
-        <div class="settings-row">
-            <span class="label">检查 dsh 更新</span>
-            <button id="btn-check-dsh" class="btn">检查</button>
-        </div>
-        <div class="settings-row">
-            <span class="label">更新 dsh</span>
-            <button id="btn-update-dsh" class="btn">更新</button>
-        </div>
+            <!-- dsh 内核 -->
+            <div class="panel" data-panel="dsh">
+                <div class="settings-title">dsh 内核</div>
+                <div class="card">
+                    <div class="card-row">
+                        <span class="label">当前版本</span>
+                        <span class="value" id="dsh-current">检测中...</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">最新版本</span>
+                        <span class="value" id="dsh-latest">-</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">状态</span>
+                        <span class="value" id="dsh-status">-</span>
+                    </div>
+                    <div class="card-actions">
+                        <button id="btn-check-dsh" class="btn">检查</button>
+                        <button id="btn-update-dsh" class="btn btn-primary">更新</button>
+                    </div>
+                    <div class="settings-log" id="dsh-update-log" style="display:none;"></div>
+                </div>
+            </div>
 
-        <div class="settings-log" id="dsh-update-log" style="display:none;"></div>
+            <!-- MCP 管理（已并入设置，不再单独开窗口） -->
+            <div class="panel" data-panel="mcp">
+                <div class="settings-title">
+                    <svg viewBox="0 0 16 16" fill="none"><path d="M2.5 4C2.5 3.2 3.2 2.5 4 2.5H12C12.8 2.5 13.5 3.2 13.5 4V12C13.5 12.8 12.8 13.5 12 13.5H4C3.2 13.5 2.5 12.8 2.5 12V4Z" stroke="currentColor" stroke-width="1"/><path d="M2.5 6H13.5M5.5 9H8M5.5 11H7" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                    MCP 管理
+                </div>
 
-        <div class="settings-actions">
-            <button id="btn-save" class="btn btn-primary">保存</button>
-        </div>
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1"/><path d="M5 5H9M5 7H9M5 9H8" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                        已配置 MCP Server
+                    </div>
+                    <div class="mcp-server-list" id="mcp-server-list"></div>
+                </div>
+
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><path d="M7 2.5V11.5M2.5 7H11.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                        添加 MCP Server
+                    </div>
+                    <div class="mcp-tabs">
+                        <button class="mcp-tab-btn active" data-tab="quick">快速安装</button>
+                        <button class="mcp-tab-btn" data-tab="manual">手动配置</button>
+                        <button class="mcp-tab-btn" data-tab="json">JSON</button>
+                    </div>
+
+                    <div class="mcp-tab-panel active" data-panel="quick">
+                        <div class="mcp-form-row">
+                            <label>命令、URL 或 JSON</label>
+                            <textarea id="mcp-quick-input" class="mcp-form-textarea" placeholder="例如：&#10;npx -y chrome-devtools-mcp@latest&#10;或 https://example.com/mcp&#10;或 {&quot;serverName&quot;:&quot;github&quot;,&quot;command&quot;:&quot;npx&quot;,&quot;args&quot;:[&quot;-y&quot;,&quot;@modelcontextprotocol/server-github&quot;]}"></textarea>
+                            <div class="mcp-hint">粘贴命令、URL 或 JSON 即可添加。需自定义名称、环境变量或请求头时，切到「手动配置」。</div>
+                        </div>
+                        <div>
+                            <span class="mcp-pill">自动识别传输方式</span>
+                            <span class="mcp-pill">重启服务后生效</span>
+                            <span class="mcp-pill">工具直接可用</span>
+                        </div>
+                        <div class="mcp-actions">
+                            <button class="btn" id="mcp-quick-cancel">取消</button>
+                            <button class="btn btn-primary" id="mcp-quick-add">添加并连接</button>
+                        </div>
+                    </div>
+
+                    <div class="mcp-tab-panel" data-panel="manual">
+                        <div class="mcp-form-row mcp-form-row-inline">
+                            <div>
+                                <label>名称 (serverName)</label>
+                                <input id="mcp-manual-name" class="mcp-form-input" placeholder="如 github" />
+                            </div>
+                            <div>
+                                <label>传输方式</label>
+                                <select id="mcp-manual-transport" class="mcp-form-select">
+                                    <option value="stdio">stdio</option>
+                                    <option value="streamable-http">streamable-http</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mcp-form-row" data-fields="stdio">
+                            <label>命令</label>
+                            <input id="mcp-manual-command" class="mcp-form-input" placeholder="如 npx" />
+                            <div class="mcp-hint">执行的可执行文件</div>
+                        </div>
+                        <div class="mcp-form-row" data-fields="stdio">
+                            <label>参数 (args, 空格分隔)</label>
+                            <input id="mcp-manual-args" class="mcp-form-input" placeholder="如 -y @modelcontextprotocol/server-github" />
+                        </div>
+                        <div class="mcp-form-row" data-fields="stdio">
+                            <label>环境变量 (可选, KEY=VALUE 每行一个)</label>
+                            <textarea id="mcp-manual-env" class="mcp-form-textarea" placeholder="如&#10;GITHUB_TOKEN=ghp_xxx&#10;DEBUG=true"></textarea>
+                        </div>
+                        <div class="mcp-form-row" data-fields="streamable-http" style="display:none;">
+                            <label>URL</label>
+                            <input id="mcp-manual-url" class="mcp-form-input" placeholder="如 http://localhost:3000/mcp" />
+                        </div>
+                        <div class="mcp-form-row" data-fields="streamable-http" style="display:none;">
+                            <label>请求头 (可选, KEY: VALUE 每行一个)</label>
+                            <textarea id="mcp-manual-headers" class="mcp-form-textarea" placeholder="如&#10;Authorization: Bearer xxxxx"></textarea>
+                        </div>
+                        <div class="mcp-actions">
+                            <button class="btn" id="mcp-manual-cancel">清空</button>
+                            <button class="btn btn-primary" id="mcp-manual-add">添加并连接</button>
+                        </div>
+                    </div>
+
+                    <div class="mcp-tab-panel" data-panel="json">
+                        <div class="mcp-form-row">
+                            <label>JSON 片段（单个 server 配置对象）</label>
+                            <textarea id="mcp-json-input" class="mcp-form-textarea" placeholder='{"serverName":"github","transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}'></textarea>
+                            <div class="mcp-hint">必填：serverName、transport；stdio 还需 command/args/env，streamable-http 还需 url/headers。</div>
+                        </div>
+                        <div class="mcp-actions">
+                            <button class="btn" id="mcp-json-cancel">取消</button>
+                            <button class="btn btn-primary" id="mcp-json-add">添加并连接</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><path d="M2.5 4C2.5 3.2 3.2 2.5 4 2.5H12C12.8 2.5 13.5 3.2 13.5 4V12C13.5 12.8 12.8 13.5 12 13.5H4C3.2 13.5 2.5 12.8 2.5 12V4Z" stroke="currentColor" stroke-width="1"/><path d="M2.5 6H13.5" stroke="currentColor" stroke-width="1"/></svg>
+                        配置文件
+                    </div>
+                    <div class="mcp-config-path" id="mcp-config-path">路径: -</div>
+                    <div class="mcp-actions" style="margin-top:12px;">
+                        <button class="btn" id="mcp-btn-open-config">打开配置文件</button>
+                        <button class="btn btn-primary" id="mcp-btn-restart">重启服务生效</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 插件管理（已并入设置） -->
+            <div class="panel" data-panel="extensions">
+                <div class="settings-title">
+                    <svg viewBox="0 0 16 16" fill="none"><path d="M8 1L6.5 3.2L4 2.5L3.8 5.1L1.5 6.2L2.8 8.5L1.5 10.8L3.8 11.9L4 14.5L6.5 13.8L8 16L9.5 13.8L12 14.5L12.2 11.9L14.5 10.8L13.2 8.5L14.5 6.2L12.2 5.1L12 2.5L9.5 3.2L8 1Z" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="8" cy="8.5" r="2" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+                    插件管理
+                </div>
+
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1"/></svg>
+                        依赖与已安装
+                    </div>
+                    <div class="mcp-server-list" id="ext-list"></div>
+                    <div class="mcp-config-path" id="ext-deps">依赖状态：加载中...</div>
+                    <div class="mcp-actions" style="margin-top:12px;">
+                        <button class="btn" id="ext-btn-checkdeps">检查并安装依赖</button>
+                        <button class="btn btn-primary" id="ext-btn-restart">重启服务生效</button>
+                    </div>
+                </div>
+
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><path d="M7 2.5V11.5M2.5 7H11.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                        添加扩展（dsh plugin add）
+                    </div>
+
+                    <div class="mcp-form-row">
+                        <label>按包名（npm 包名，如 @scope/name 或 name）</label>
+                        <input id="ext-pkg-input" class="mcp-form-input" placeholder="例如：dsh-better-sidebar 或 @liustack/modlens" />
+                        <div class="mcp-hint">也支持 github:owner/repo 形式（git 源安装时 pnpm 可能拦截构建脚本，见下方日志提示）。</div>
+                        <div class="mcp-actions">
+                            <button class="btn" id="ext-pkg-cancel">清空</button>
+                            <button class="btn btn-primary" id="ext-pkg-add">添加并连接</button>
+                        </div>
+                    </div>
+
+                    <div class="mcp-form-row">
+                        <label>按 URL（git+https://... 或 tarball .tar.gz）</label>
+                        <input id="ext-url-input" class="mcp-form-input" placeholder="例如：git+https://github.com/owner/repo.git" />
+                        <div class="mcp-hint">git 源需 pnpm 放行 prepare 构建脚本，tarball 直接下载安装。</div>
+                        <div class="mcp-actions">
+                            <button class="btn" id="ext-url-cancel">清空</button>
+                            <button class="btn btn-primary" id="ext-url-add">添加并连接</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mcp-card">
+                    <div class="mcp-card-title">
+                        <svg viewBox="0 0 14 14" fill="none"><path d="M2.5 4C2.5 3.2 3.2 2.5 4 2.5H12C12.8 2.5 13.5 3.2 13.5 4V12C13.5 12.8 12.8 13.5 12 13.5H4C3.2 13.5 2.5 12.8 2.5 12V4Z" stroke="currentColor" stroke-width="1"/></svg>
+                        安装日志
+                    </div>
+                    <div class="settings-log" id="ext-log" style="display:none;"></div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <script type="module" src="/src/settings/main.ts"></script>
+    <script>
+        // 侧边导航切换（面板显示/隐藏）
+        (function () {
+            var navItems = document.querySelectorAll(".nav-item");
+            var panels = document.querySelectorAll(".panel");
+            navItems.forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var target = btn.dataset.panel;
+                    navItems.forEach(function (b) { b.classList.toggle("active", b === btn); });
+                    panels.forEach(function (p) { p.classList.toggle("active", p.dataset.panel === target); });
+                });
+            });
+        })();
+    </script>
 </body>
 </html>
