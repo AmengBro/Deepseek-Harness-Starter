@@ -42,9 +42,7 @@
         </div>
     </div>
 
-    <!-- WebView 态：服务就绪后显示（dsh 在独立新窗口中弹出，主窗口这里仅显示提示文字）
-         Tauri 1.x 没有嵌入式 webview API，必须由 Rust 端 WindowBuilder 创建独立新窗口加载 dsh。
-         见 src-tauri/src/lib.rs::open_dsh_webview_window。 -->
+    <!-- WebView 态：服务就绪后显示 -->
     <div id="webview-view" class="webview-view hidden"></div>
 
     <script type="module" src="/src/main.ts"></script>

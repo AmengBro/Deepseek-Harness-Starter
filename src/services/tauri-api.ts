@@ -20,6 +20,18 @@ export interface ReleaseInfo {
     published_at?: string;
 }
 
+/// 检查更新后的统一状态回报（无论「有更新 / 已最新 / 出错」都会回传）
+export interface UpdateCheckResult {
+    /// GitHub 最新 tag（含 v 前缀，如 "v1.2.0"）；出错时为 "unknown"
+    latest: string;
+    /// 当前本机版本（含 v 前缀）
+    current: string;
+    /// 是否需要更新
+    update_available: boolean;
+    /// 出错原因；成功时为 undefined
+    error?: string;
+}
+
 export interface DshVersionInfo {
     current: string;
     latest: string;
@@ -101,6 +113,11 @@ export class TauriApi {
         return invoke<void>("open_log_folder");
     }
 
+    async openDshWebviewWindow(url: string): Promise<void> {
+        // Tauri 1.x 没有嵌入式 webview，必须由 Rust 端 WindowBuilder 创建独立新窗口
+        return invoke<void>("open_dsh_webview_window", { url });
+    }
+
     async openInstallDir(): Promise<void> {
         return invoke<void>("open_install_dir");
     }
@@ -159,6 +176,13 @@ export class TauriApi {
 
     async onUpdateAvailable(callback: (info: ReleaseInfo) => void): Promise<void> {
         const unlisten = await listen<ReleaseInfo>("update-available", (event) => {
+            callback(event.payload);
+        });
+        this.listeners.push(unlisten);
+    }
+
+    async onUpdateChecked(callback: (info: UpdateCheckResult) => void): Promise<void> {
+        const unlisten = await listen<UpdateCheckResult>("update-checked", (event) => {
             callback(event.payload);
         });
         this.listeners.push(unlisten);

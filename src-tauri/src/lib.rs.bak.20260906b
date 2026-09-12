@@ -278,38 +278,13 @@ where
 /// Tauri 1.x 没有嵌入式 webview API（add_webview），且 HTML <webview> 标签不被 wry 识别，
 /// 必须用 WindowBuilder 创建独立新窗口加载 dsh URL。
 /// 新窗口走原生 WebView2，没有 iframe 跨源 Origin 限制，dsh 会接受带 token 的访问。
-///
-/// 关键行为：复用已有窗口时，**不能只 show+focus**——dsh 重启会换 token，
-/// 旧 webview 仍加载旧 token URL 会导致 dsh 返回 "authentication required"。
-/// 必须 eval JS 跳转到新 URL。用 JSON.stringify 把 URL 序列化进 JS，避免 token 字符串
-/// 含单引号/反斜杠被错误转义。eval 失败兜底：close 旧窗口重建。
 fn open_dsh_webview_inner(app_handle: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    // 复用已有窗口（避免重复创建导致 WebView2 句柄泄漏 / 端口占用）
     if let Some(window) = app_handle.get_window("dsh-web") {
-        logger::log_to_file(
-            &get_install_dir(),
-            "INFO",
-            "dsh web 窗口已存在，注入 JS 跳转至新 URL",
-        );
-        // 用 JSON 序列化保证 token 含特殊字符也不被截断
-        let js = format!(
-            "window.location.replace({});",
-            serde_json::Value::String(url.to_string())
-        );
-        if window.eval(&js).is_err() {
-            // 极少数情况 wry eval 失败（比如 webview 还在加载中），兜底关掉重建
-            logger::log_to_file(
-                &get_install_dir(),
-                "WARN",
-                "webview eval 失败，关闭并重建窗口",
-            );
-            let _ = window.close();
-            // 注意：close 是异步的，要立刻重建会失败，等一行同步让 wry 处理完关事件
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        } else {
-            let _ = window.show();
-            let _ = window.set_focus();
-            return Ok(());
-        }
+        logger::log_to_file(&get_install_dir(), "INFO", "dsh web 窗口已存在，正在显示");
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
     }
 
     let parsed_url = tauri::Url::parse(url)

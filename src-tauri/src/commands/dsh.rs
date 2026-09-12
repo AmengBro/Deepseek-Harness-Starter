@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager};
 use tokio::process::Command as AsyncCommand;
 use tokio::time::Duration;
 
-use crate::commands::service::get_install_dir;
+use crate::commands::service::{get_install_dir, new_dsh_command};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DshVersionInfo {
@@ -15,7 +15,7 @@ pub struct DshVersionInfo {
     pub latest: String,
     /// 是否需要更新
     pub needs_update: bool,
-    /// 版本探测来源："global" | "npx" | "unknown"
+    /// 版本探测来源："global" | "unknown"
     pub source: String,
 }
 
@@ -26,10 +26,12 @@ async fn fetch_latest_version() -> Result<String, String> {
     let url = "https://registry.npmjs.org/@deepseek-ai/dsh/latest";
     let client = reqwest::Client::builder()
         .user_agent("DeepseekHarness")
+        .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     let resp = client
         .get(url)
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| format!("请求 npm registry 失败: {}", e))?;
@@ -46,37 +48,19 @@ async fn fetch_latest_version() -> Result<String, String> {
         .ok_or_else(|| "无法获取 latest 版本号".to_string())
 }
 
-/// 探测当前（启动时会用到的）dsh 版本：优先全局 dsh --version，失败回退 npx（与启动命令一致）
+/// 探测当前（启动时会用到的）全局 dsh 版本，不通过 npx 隐式下载。
 async fn detect_current_version() -> (String, String) {
-    // 策略1：全局已安装的 dsh
-    #[cfg(target_os = "windows")]
-    let probe_global = AsyncCommand::new("cmd").args(["/c", "dsh", "--version"]).output();
-    #[cfg(not(target_os = "windows"))]
-    let probe_global = AsyncCommand::new("dsh").arg("--version").output();
+    let Some(mut command) = new_dsh_command() else {
+        return ("unknown".to_string(), "unknown".to_string());
+    };
+    command.arg("--version");
+    let probe_global = AsyncCommand::from(command).output();
 
     if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(8), probe_global).await {
         if out.status.success() {
             let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !v.is_empty() {
                 return (v, "global".to_string());
-            }
-        }
-    }
-
-    // 策略2：npx（与启动器实际启动命令一致，但首次可能触发下载）
-    #[cfg(target_os = "windows")]
-    let probe_npx =
-        AsyncCommand::new("cmd").args(["/c", "npx", "--yes", NPM_PKG, "--version"]).output();
-    #[cfg(not(target_os = "windows"))]
-    let probe_npx = AsyncCommand::new("npx")
-        .args(["--yes", NPM_PKG, "--version"])
-        .output();
-
-    if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(40), probe_npx).await {
-        if out.status.success() {
-            let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !v.is_empty() {
-                return (v, "npx".to_string());
             }
         }
     }
@@ -184,6 +168,7 @@ pub async fn update_dsh(app_handle: AppHandle) -> Result<String, String> {
         "install",
         "-g",
         &format!("{}@latest", NPM_PKG),
+        "--force",
         "--verbose",
         "--no-audit",
         "--no-fund",
@@ -196,6 +181,7 @@ pub async fn update_dsh(app_handle: AppHandle) -> Result<String, String> {
         "install",
         "-g",
         &format!("{}@latest", NPM_PKG),
+        "--force",
         "--verbose",
         "--no-audit",
         "--no-fund",

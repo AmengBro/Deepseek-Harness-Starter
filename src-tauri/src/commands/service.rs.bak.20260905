@@ -3,23 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::Mutex;
-
-/// 在 Windows 下隐藏子进程的控制台窗口（避免 GUI 程序 spawn cmd/node 时黑窗闪过）。
-/// 非 Windows 平台为空操作。用于所有以 .output()/.status() 方式的探测命令。
-#[cfg(target_os = "windows")]
-fn hide_console(cmd: &mut AsyncCommand) {
-    cmd.creation_flags(0x08000000);
-}
-#[cfg(not(target_os = "windows"))]
-fn hide_console(_cmd: &mut AsyncCommand) {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServiceStatus {
@@ -35,36 +24,6 @@ pub struct ServiceManager {
     restart_count: Arc<Mutex<u32>>,
     is_restarting: Arc<AtomicBool>,
     monitor_running: Arc<AtomicBool>,
-    /// dsh web 启动后打印的带 token 认证 URL。
-    /// 用 `std::sync::Mutex` 以便 `read_pipe` 的同步线程能直接写入，无需跨 await 拿 tokio Mutex。
-    /// 前端 iframe 必须用此完整 URL（含 ?token=）访问，否则 dsh 返回 "authentication required"。
-    auth_url: Arc<std::sync::Mutex<Option<String>>>,
-    /// 防止 `service-ready` 事件重复发送：read_pipe 抓到认证 URL与探测循环就绪
-    /// 任一先触发即可，另一方见到 true 即跳过。
-    ready_emitted: Arc<AtomicBool>,
-}
-
-/// dsh 启动完成后，"主窗口隐藏到托盘"动作。
-///
-/// 用户设计意图：主窗口只用于启动日志展示，dsh 一起好，主窗口就 hide 让位
-/// 给独立 dsh web 窗口（这是 Tauri 1.x 的硬限制——嵌入式 webview 不可用）。
-/// 用户可以：
-/// - 从系统托盘左键点击 → toggle 主窗口显隐（lib.rs `SystemTrayEvent::LeftClick`）
-/// - 或托盘菜单"打开主界面" → show 主窗口（lib.rs "open" 菜单项）
-///
-/// 该函数集中处理 hide 调用，所有 emit "service-ready" 之后都应调一次。
-fn auto_hide_main_window(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_window("main") {
-        if window.is_visible().unwrap_or(false) {
-            if window.hide().is_ok() {
-                let _ = app_handle.emit_all(
-                    "service-log",
-                    "[系统] dsh 已就绪，主窗口已隐藏到托盘（点击托盘图标可重新打开）"
-                        .to_string(),
-                );
-            }
-        }
-    }
 }
 
 impl ServiceManager {
@@ -80,8 +39,6 @@ impl ServiceManager {
             restart_count: Arc::new(Mutex::new(0)),
             is_restarting: Arc::new(AtomicBool::new(false)),
             monitor_running: Arc::new(AtomicBool::new(false)),
-            auth_url: Arc::new(std::sync::Mutex::new(None)),
-            ready_emitted: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -90,49 +47,38 @@ impl ServiceManager {
         *count = 0;
     }
 
-    /// 清空上次启动抓到的 auth_url + 重置 ready_emitted CAS 标志位。
-    /// 服务重启（手动 stop+start / monitor 自动重启）时**必须调用**，
-    /// 否则新 dsh 进程的 token URL 被旧 CAS 跳过 emit，前端永远收不到第二次 service-ready
-    /// → 用了不匹配的新旧 URL → dsh 显示 "authentication required" 拒绝访问。
-    pub async fn reset_ready_state(&self) {
-        if let Ok(mut g) = self.auth_url.lock() {
-            *g = None;
-        }
-        self.ready_emitted.store(false, Ordering::SeqCst);
-    }
-
     /// 同步杀掉服务进程（退出时调用）
-    /// 关键优化：仅异步发起 taskkill /F /T 即返回，**绝不阻塞等待子进程退出**——
-    /// 之前最多等 2 秒的 try_wait 轮询正是「退出太慢」的元凶。
-    /// taskkill 作为独立 OS 进程会在后台把整个 dsh 进程树（cmd → npx → node → ...）清掉，
-    /// 应用进程可立即 app.exit，无需陪跑。
+    /// 关键优化：taskkill 改用 spawn 不再等 status，避免在 dsh 复杂进程树（cmd → npx → node → ...）下长时间阻塞
+    /// 整体加 2 秒硬上限，超时就不等了——进程会被系统或 taskkill /F 异步清理
     pub fn kill_service_blocking(&self) {
         self.is_restarting.store(true, Ordering::SeqCst);
         let mut process = self.process.blocking_lock();
-        if let Some(child) = process.take() {
+        if let Some(mut child) = process.take() {
             let pid = child.id();
-            // 先释放 Child 句柄，避免持有导致后续清理语义混乱
-            drop(child);
             #[cfg(target_os = "windows")]
             {
-                // spawn 异步发起 taskkill，不 wait status——后台静默清理进程树
+                // 用 spawn 异步发起 taskkill，不 wait status（taskkill /F 在大型进程树上偶尔会卡几秒）
                 let _ = std::process::Command::new("taskkill")
                     .args(["/T", "/F", "/PID", &pid.to_string()])
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .creation_flags(0x08000000)
                     .spawn();
+                // 给子进程最多 2 秒时间退出，超时不再等（避免退出很慢）
+                let start = std::time::Instant::now();
+                while start.elapsed() < std::time::Duration::from_secs(2) {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+                    }
+                }
+                // 即使超时也不 wait()——避免 hang 在 av/ntdll 锁
             }
             #[cfg(not(target_os = "windows"))]
             {
-                let _ = std::process::Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
+                let _ = child.kill();
+                let _ = child.wait();
             }
         }
-        // 立即返回，不 wait——让 app.exit 瞬发，不再 hang 在 av/ntdll 锁
     }
 }
 
@@ -158,12 +104,7 @@ pub async fn check_node() -> Result<String, String> {
     // 策略1：直接调用 node（PATH 中有 node 时生效）
     if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(3),
-        {
-            let mut c = AsyncCommand::new("node");
-            c.arg("--version");
-            hide_console(&mut c);
-            c.output()
-        },
+        AsyncCommand::new("node").arg("--version").output(),
     ).await {
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -175,27 +116,17 @@ pub async fn check_node() -> Result<String, String> {
     {
         if let Ok(Ok(output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new("cmd");
-                c.args(["/c", "node", "--version"]);
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new("cmd").args(["/c", "node", "--version"]).output(),
         ).await {
             if output.status.success() {
                 return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
             }
         }
 
-        // 策略3：用 where 命令查找 node 路径（std 同步调用，单独加隐藏标志）
+        // 策略3：用 where 命令查找 node 路径
         if let Ok(Ok(where_output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new("where");
-                c.arg("node");
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new("where").arg("node").output(),
         ).await {
             if where_output.status.success() {
                 let paths = String::from_utf8_lossy(&where_output.stdout);
@@ -203,12 +134,7 @@ pub async fn check_node() -> Result<String, String> {
                     let node_path = first_line.trim();
                     if let Ok(Ok(output)) = tokio::time::timeout(
                         Duration::from_secs(3),
-                        {
-                            let mut c = AsyncCommand::new(node_path);
-                            c.arg("--version");
-                            hide_console(&mut c);
-                            c.output()
-                        },
+                        AsyncCommand::new(node_path).arg("--version").output(),
                     ).await {
                         if output.status.success() {
                             return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -226,12 +152,7 @@ pub async fn check_node() -> Result<String, String> {
         for path in &common_paths {
             if let Ok(Ok(output)) = tokio::time::timeout(
                 Duration::from_secs(3),
-                {
-                    let mut c = AsyncCommand::new(path);
-                    c.arg("--version");
-                    hide_console(&mut c);
-                    c.output()
-                },
+                AsyncCommand::new(path).arg("--version").output(),
             ).await {
                 if output.status.success() {
                     return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -250,12 +171,7 @@ pub async fn check_node() -> Result<String, String> {
         };
         if let Ok(Ok(output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new(shell);
-                c.args(["-c", "node --version"]);
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new(shell).args(["-c", "node --version"]).output(),
         ).await {
             if output.status.success() {
                 return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -365,7 +281,6 @@ pub fn find_npx_launcher() -> Option<NpxLauncher> {
         // 策略 1：where node → 拿到 node.exe → 推导同目录 node_modules/npm/bin/npx-cli.js
         if let Ok(output) = std::process::Command::new("where")
             .arg("node")
-            .creation_flags(0x08000000)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
@@ -394,7 +309,6 @@ pub fn find_npx_launcher() -> Option<NpxLauncher> {
         // 策略 2：where npx → 如果有 npx.exe 则直接用
         if let Ok(output) = std::process::Command::new("where")
             .arg("npx")
-            .creation_flags(0x08000000)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
@@ -609,31 +523,12 @@ pub(crate) fn new_dsh_command() -> Option<Command> {
     Some(command)
 }
 
-/// 给已构造好的 dsh `Command` 追加 `web --port <port> --no-open` 参数。
-///
-/// ⚠️ 端口必须用 `--port` 参数传递：dsh (`--profile web`) 只认这个 flag，
-/// 不读 PORT 环境变量。旧版本用 `env("PORT", ...)` 会让 dsh 监听自己的默认端口，
-/// 导致后端 `is_tcp_port_open(3080)` 永远连接失败 → 90 秒硬上限超时 →
-/// 前端收不到 `service-ready` 事件 → 内嵌 webview 永远不显示（卡 loading）。
-///
-/// 验证方式：`dsh web --help` 可见 `--port <port>  listen port`；
-/// npm readme 也只展示 `dsh --profile web --port 8080` 这种用法。
-///
-/// `--no-open` 顺手抑制 dsh 默认调起系统浏览器，避免和外层 iframe 体验冲突。
-///
-/// 拆成独立函数是为了方便单元测试（见 `tests::dsh_web_command_uses_port_flag`），
-/// 直接验证参数契约，不依赖 dsh 是否真的安装。
-fn configure_dsh_web_command(mut cmd: Command, port: u16) -> Command {
-    cmd.arg("web");
-    cmd.arg("--port").arg(port.to_string());
-    cmd.arg("--no-open");
-    cmd
-}
-
 fn spawn_dsh_process(install_dir: &PathBuf, port: u16) -> Result<Child, String> {
-    let cmd = new_dsh_command().ok_or_else(|| "未检测到已安装的 dsh".to_string())?;
-    let mut cmd = configure_dsh_web_command(cmd, port);
-    cmd.current_dir(install_dir)
+    let mut cmd = new_dsh_command().ok_or_else(|| "未检测到已安装的 dsh".to_string())?;
+
+    cmd.arg("web");
+    cmd.env("PORT", port.to_string())
+        .current_dir(install_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -649,7 +544,6 @@ fn kill_process_tree(child: &mut Child) {
             .args(["/T", "/F", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(0x08000000)
             .status();
         let _ = child.wait();
     }
@@ -798,23 +692,13 @@ pub async fn start_service(
                 status.url = format!("http://127.0.0.1:{}", config.port);
                 let _ = app_handle.emit_all("service-status", status.clone());
             }
-            // 关键修复：PortProbe::Running 路径下启动器没 spawn dsh 也没 read_pipe，
-            // 无法拿到 token URL。如果 emit 裸 URL，前端会弹窗打开 dsh 但 dsh 会拒认证
-            // （"authentication required; reopen the URL printed by dsh web"）。
-            // 只更新状态不 emit service-ready，让用户去手动访问 dsh 自己打印的 URL。
+            let url = format!("http://127.0.0.1:{}", config.port);
+            let _ = app_handle.emit_all("service-ready", url);
             let _ = app_handle.emit_all(
                 "service-log",
-                format!(
-                    "[系统] 检测到端口 {} 已有 dsh 在运行（不是启动器启动的）— 启动器无法获取其 token URL，\
-                     请使用 dsh 自己打印的完整 URL（带 ?token=...）访问。已阻止前端弹出裸 URL 被 dsh 拒认证。",
-                    config.port
-                ),
+                "[系统] 服务已就绪（复用现有服务）".to_string(),
             );
-            crate::logger::log_to_file(
-                &install_dir,
-                "INFO",
-                "PortProbe::Running: 跳过 service-ready emit（无 token URL）",
-            );
+            crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪（复用现有服务）");
             return Ok(());
         }
         PortProbe::OccupiedByOther => {
@@ -936,6 +820,7 @@ pub async fn start_service(
 
     // 等待服务就绪（最长 90 秒）
     let handle_ready = app_handle.clone();
+    let url = format!("http://127.0.0.1:{}", port);
     tokio::spawn(async move {
         let mut ready = false;
         const MAX_WAIT: u64 = 90;
@@ -955,29 +840,7 @@ pub async fn start_service(
         }
         let install_dir = get_install_dir();
         if ready {
-            // 优先等 read_pipe 线程捕获到带 token 的认证 URL（最多 15 秒），
-            // 避免发出裸 URL 导致 dsh 返回 "authentication required"。
-            // 15 秒而非 8 秒：Node 子进程在 stdout 被 pipe（非 TTY）时会缓冲输出，
-            // token URL 行可能迟到，给足时间避免被漏掉。
-            let status_manager = handle_ready.state::<ServiceManager>();
-            for _ in 0..15 {
-                if status_manager.ready_emitted.load(Ordering::SeqCst) {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            // 防重复：若 read_pipe 已发送则跳过
-            if status_manager.ready_emitted.swap(true, Ordering::SeqCst) {
-                return;
-            }
-            let url = status_manager
-                .auth_url
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
             let _ = handle_ready.emit_all("service-ready", url.clone());
-            auto_hide_main_window(&handle_ready);
             let _ = handle_ready.emit_all("service-log", "[系统] 服务已就绪".to_string());
             crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪");
         } else {
@@ -1092,22 +955,15 @@ fn spawn_monitor(
                             let mut st = status.lock().await;
                             st.running = false;
                             let _ = app_handle.emit_all("service-status", st.clone());
-                            drop(st);
                             crate::logger::log_to_file(
                                 &install_dir,
                                 "ERROR",
-                                "自动重启已达最大次数，服务已停止（监控循环退出）",
+                                "自动重启已达最大次数，服务已停止",
                             );
                             let _ = app_handle.emit_all(
                                 "service-log",
-                                "[系统] 自动重启已达最大次数，服务已停止（监控循环退出）".to_string(),
+                                "[系统] 自动重启已达最大次数，服务已停止".to_string(),
                             );
-                            // 关键修复：break 跳出 monitor loop，整个 async task 死亡，proc MutexGuard 自动 drop，
-                            // process 锁自然释放，无需手动清空（也清不了——match arm 内 `proc.as_mut()` 借用了
-                            // proc 到 arm 结束，borrow check 阻止 mutate）。
-                            // 之前每 1 秒重复打一次 error 日志（"日志爆炸"）是因为没 break，下个循环又 try_wait
-                            // 同一个已退出 child 又触发同一个 else 分支。
-                            break;
                         }
                     }
                     Ok(None) => {}
@@ -1125,11 +981,6 @@ async fn start_service_internal(
     status: Arc<Mutex<ServiceStatus>>,
     install_dir: PathBuf,
 ) -> Result<(), String> {
-    // 关键修复：服务重启（手动 restart / monitor 自动重启）时清空上次的 auth_url + 重置 ready_emitted CAS，
-    // 否则 read_pipe 抓到新 token URL 会被旧 CAS 跳过 emit → 前端永远不重弹 webview → 拒绝访问（用了旧 URL）。
-    let status_manager = app_handle.state::<ServiceManager>();
-    status_manager.reset_ready_state().await;
-
     let port = find_available_port(config.port).await?;
 
     if port != config.port {
@@ -1177,6 +1028,7 @@ async fn start_service_internal(
     start_pipe_readers(&app_handle, &install_dir, port, stdout, stderr);
 
     let handle_ready = app_handle.clone();
+    let url = format!("http://127.0.0.1:{}", port);
     tokio::spawn(async move {
         let mut ready = false;
         const MAX_WAIT: u64 = 90;
@@ -1196,29 +1048,7 @@ async fn start_service_internal(
         }
         let install_dir = get_install_dir();
         if ready {
-            // 优先等 read_pipe 线程捕获到带 token 的认证 URL（最多 15 秒），
-            // 避免发出裸 URL 导致 dsh 返回 "authentication required"。
-            // 15 秒而非 8 秒：Node 子进程在 stdout 被 pipe（非 TTY）时会缓冲输出，
-            // token URL 行可能迟到，给足时间避免被漏掉。
-            let status_manager = handle_ready.state::<ServiceManager>();
-            for _ in 0..15 {
-                if status_manager.ready_emitted.load(Ordering::SeqCst) {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            // 防重复：若 read_pipe 已发送则跳过
-            if status_manager.ready_emitted.swap(true, Ordering::SeqCst) {
-                return;
-            }
-            let url = status_manager
-                .auth_url
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
             let _ = handle_ready.emit_all("service-ready", url.clone());
-            auto_hide_main_window(&handle_ready);
             let _ = handle_ready.emit_all("service-log", "[系统] 服务已就绪".to_string());
             crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪");
         } else {
@@ -1249,7 +1079,6 @@ pub async fn stop_service(app_handle: AppHandle) -> Result<(), String> {
                 .args(["/T", "/F", "/PID", &pid.to_string()])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .creation_flags(0x08000000)
                 .status();
             let _ = child.wait();
         }
@@ -1285,54 +1114,6 @@ pub async fn stop_service(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 从 dsh web 的 stdout 行中提取访问 URL。
-///
-/// 新版 dsh 默认启用 URL token 认证：启动后打印形如
-/// `dsh web: http://127.0.0.1:3080/?token=abc123`，必须把整串（含 `?token=` 查询参数）
-/// 原样交给前端 iframe，否则 dsh 会返回 "authentication required; reopen the URL printed by dsh web"。
-///
-/// 旧版 dsh 打印不带 token 的 `http://127.0.0.1:3080`，这里同样能提取（兼容）。
-/// 同时兼容 `localhost` 写法与多端口（不硬编码 3080）。
-///
-/// 注意：只匹配 `127.0.0.1` / `localhost` 的 http URL，避免误抓日志里其它 http 链接。
-fn extract_dsh_url(line: &str) -> Option<String> {
-    for prefix in ["http://127.0.0.1:", "http://localhost:"] {
-        if let Some(idx) = line.find(prefix) {
-            let rest = &line[idx..];
-            // 截到空白或常见引号/尖括号为止，避免把行尾无关字符带进 URL
-            let end = rest
-                .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>')
-                .unwrap_or(rest.len());
-            let candidate = &rest[..end];
-            if candidate.starts_with("http://") && candidate.contains(':') {
-                return Some(candidate.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// 剥掉 ANSI 转义序列（如 `\x1b[36m...\x1b[0m` 颜色码）。
-/// dsh 可能给 `dsh web:` 等输出上色，转义码插在文本里会让 `extract_dsh_url`
-/// 的子串查找误判，先剥干净再提取更稳。
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            // 跳过 ESC[ ... 直到一个字母（CSI 序列结束符）
-            for n in chars.by_ref() {
-                if n.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
 fn read_pipe<R: Read>(
     pipe: R,
     app_handle: AppHandle,
@@ -1366,57 +1147,6 @@ fn read_pipe<R: Read>(
                 }
 
                 let _ = app_handle.emit_all("service-log", log_line);
-
-                // 捕获 dsh web 打印的带 token 认证 URL，交给前端 iframe 使用。
-                // 详见 `extract_dsh_url` 注释：新版 dsh 必须带 ?token= 才能通过认证。
-                // 先剥掉 ANSI 转义码（dsh 可能给输出上色），避免干扰 URL 提取。
-                let clean_line = strip_ansi(&line);
-                if let Some(auth_url) = extract_dsh_url(&clean_line) {
-                    // ★ 明确把抓取到的完整 URL 写进日志文件，便于在 npmlog 中验证抓取是否生效。
-                    // dsh 原样输出行已经在上方写过了，这里再补一行「捕获确认」，两行对照一目了然。
-                    if let Ok(mut cap_file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_file_path)
-                    {
-                        let _ = writeln!(
-                            cap_file,
-                            "[{}] [捕获] 已提取 dsh 认证 URL（将发送给前端 iframe）: {}",
-                            timestamp, auth_url
-                        );
-                    }
-                    // 同时写一份到 applog，双保险
-                    crate::logger::log_to_file(
-                        &install_dir,
-                        "INFO",
-                        &format!("已提取 dsh 认证 URL（将发送给前端 iframe）: {}", auth_url),
-                    );
-                    let sm = app_handle.state::<ServiceManager>();
-                    if let Ok(mut g) = sm.auth_url.lock() {
-                        *g = Some(auth_url.clone());
-                    }
-                    // 首次捕获即视为服务就绪，立即通知前端（带 token 的 URL）
-                    if !sm.ready_emitted.swap(true, Ordering::SeqCst) {
-                        let _ = app_handle.emit_all("service-ready", auth_url.clone());
-                        let _ = app_handle.emit_all(
-                            "service-log",
-                            "[系统] 已捕获 dsh 认证 URL，服务已就绪".to_string(),
-                        );
-                        auto_hide_main_window(&app_handle);
-                    }
-                } else if clean_line.contains("token=") {
-                    // dsh 输出了 token 但没能提取成 URL（格式变化等），报警便于排查
-                    let _ = app_handle.emit_all(
-                        "service-log",
-                        format!("[调试] dsh 输出含 token= 但未能提取 URL，原始行: {}", line),
-                    );
-                    // 同样写进日志文件，方便用户直接看到这种边界情况
-                    let _ = crate::logger::log_to_file(
-                        &install_dir,
-                        "DEBUG",
-                        &format!("dsh 输出含 token= 但未能提取 URL，原始行: {}", line),
-                    );
-                }
             }
             Err(_) => break,
         }
@@ -1481,139 +1211,5 @@ mod tests {
     fn ignores_non_windows_shims() {
         assert!(dsh_launcher_from_path(PathBuf::from(r"C:\npm\dsh")).is_none());
         assert!(dsh_launcher_from_path(PathBuf::from(r"C:\npm\dsh.ps1")).is_none());
-    }
-}
-
-/// 参数契约回归测试：覆盖「构造 dsh web 命令」的 bug。
-///
-/// 历史教训：旧版 `spawn_dsh_process` 用 `cmd.env("PORT", port)` 传端口，
-/// 但 dsh (`--profile web`) **不读 PORT 环境变量**，只认 `--port` 参数，
-/// 导致 dsh 监听默认端口 → 启动器 90 秒内 TCP 探测 3080 永远失败 → 前端卡 loading。
-///
-/// 这个测试用 `Command::new("dsh")` 绕过 `new_dsh_command` 的查找逻辑，
-/// 只验证参数拼接契约，跨平台都能跑、不依赖 dsh 是否真安装。
-#[cfg(test)]
-mod dsh_command_args_tests {
-    use super::{configure_dsh_web_command, extract_dsh_url};
-    use std::process::Command;
-
-    fn args_of(cmd: &Command) -> Vec<&str> {
-        cmd.get_args().filter_map(|a| a.to_str()).collect()
-    }
-
-    #[test]
-    fn dsh_web_command_uses_port_flag_not_env() {
-        let cmd = configure_dsh_web_command(Command::new("dsh"), 3080);
-        let args = args_of(&cmd);
-
-        // 1) 必须包含 --port 和端口号（核心契约：这是修复的核心）
-        assert!(
-            args.contains(&"--port"),
-            "dsh 必须接收 --port 参数（不读 PORT 环境变量），实际 args: {:?}",
-            args
-        );
-        assert!(
-            args.contains(&"3080"),
-            "端口号必须作为独立 token 出现，实际 args: {:?}",
-            args
-        );
-
-        // 2) 必须包含 web 子命令
-        assert!(args.contains(&"web"), "必须传 web 子命令，实际 args: {:?}", args);
-
-        // 3) 必须包含 --no-open 抑制默认浏览器弹窗
-        assert!(
-            args.contains(&"--no-open"),
-            "必须传 --no-open 抑制 dsh 默认开浏览器，实际 args: {:?}",
-            args
-        );
-
-        // 4) 严格顺序：web --port <port> --no-open（避免被人插 flag 打断）
-        let web_idx = args.iter().position(|&a| a == "web").expect("web 子命令缺失");
-        assert_eq!(
-            args.get(web_idx + 1).copied(),
-            Some("--port"),
-            "--port 必须紧跟 web 之后，实际 args: {:?}",
-            args
-        );
-        assert_eq!(
-            args.get(web_idx + 2).copied(),
-            Some("3080"),
-            "端口号必须紧跟 --port 之后，实际 args: {:?}",
-            args
-        );
-        assert_eq!(
-            args.get(web_idx + 3).copied(),
-            Some("--no-open"),
-            "--no-open 必须紧跟端口号之后，实际 args: {:?}",
-            args
-        );
-    }
-
-    #[test]
-    fn dsh_web_command_honors_custom_port() {
-        // 防止「写死 3080」之类的退化：用户改 config.toml 端口后必须能传出去
-        let cmd = configure_dsh_web_command(Command::new("dsh"), 1420);
-        let args = args_of(&cmd);
-        assert!(args.contains(&"1420"), "自定义端口必须被透传，实际 args: {:?}", args);
-        assert!(
-            !args.contains(&"3080"),
-            "传非 3080 端口时不应出现 3080 字面量，实际 args: {:?}",
-            args
-        );
-    }
-
-    #[test]
-    fn dsh_url_extract_captures_token_url() {
-        // 新版 dsh：必须整串（含 ?token=）原样提取，否则前端认证失败
-        assert_eq!(
-            extract_dsh_url("dsh web: http://127.0.0.1:3080/?token=abc123XYZ"),
-            Some("http://127.0.0.1:3080/?token=abc123XYZ".to_string())
-        );
-    }
-
-    #[test]
-    fn dsh_url_extract_captures_plain_url_without_token() {
-        // 旧版 dsh：无 token 也能提取（兼容）
-        assert_eq!(
-            extract_dsh_url("dsh web: http://127.0.0.1:3080"),
-            Some("http://127.0.0.1:3080".to_string())
-        );
-    }
-
-    #[test]
-    fn dsh_url_extract_keeps_underscore_in_token() {
-        // 真实 dsh 打印的 token 含下划线（如 l13aTokKJe0os8tAIWGJ19V7eX_v6DyktXD4ydUT_2k），
-        // 截断逻辑不能把 `_` 当空白切掉，否则前端 iframe 用残缺 token 会认证失败。
-        assert_eq!(
-            extract_dsh_url(
-                "dsh web: http://127.0.0.1:3080/?token=l13aTokKJe0os8tAIWGJ19V7eX_v6DyktXD4ydUT_2k"
-            ),
-            Some(
-                "http://127.0.0.1:3080/?token=l13aTokKJe0os8tAIWGJ19V7eX_v6DyktXD4ydUT_2k"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn dsh_url_extract_handles_localhost_and_stops_at_whitespace() {
-        assert_eq!(
-            extract_dsh_url("dsh web: http://localhost:3080/?token=xyz and text"),
-            Some("http://localhost:3080/?token=xyz".to_string())
-        );
-    }
-
-    #[test]
-    fn dsh_url_extract_ignores_unrelated_lines() {
-        assert_eq!(
-            extract_dsh_url("npm warn deprecated node-domexception@1.0.0"),
-            None
-        );
-        // 非 127.0.0.1/localhost:port 的 http 链接不应被误抓
-        assert_eq!(
-            extract_dsh_url("see http://example.com/index for docs"),
-            None
-        );
     }
 }

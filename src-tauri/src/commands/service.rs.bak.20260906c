@@ -3,23 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tokio::process::Command as AsyncCommand;
 use tokio::sync::Mutex;
-
-/// 在 Windows 下隐藏子进程的控制台窗口（避免 GUI 程序 spawn cmd/node 时黑窗闪过）。
-/// 非 Windows 平台为空操作。用于所有以 .output()/.status() 方式的探测命令。
-#[cfg(target_os = "windows")]
-fn hide_console(cmd: &mut AsyncCommand) {
-    cmd.creation_flags(0x08000000);
-}
-#[cfg(not(target_os = "windows"))]
-fn hide_console(_cmd: &mut AsyncCommand) {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServiceStatus {
@@ -42,29 +31,6 @@ pub struct ServiceManager {
     /// 防止 `service-ready` 事件重复发送：read_pipe 抓到认证 URL与探测循环就绪
     /// 任一先触发即可，另一方见到 true 即跳过。
     ready_emitted: Arc<AtomicBool>,
-}
-
-/// dsh 启动完成后，"主窗口隐藏到托盘"动作。
-///
-/// 用户设计意图：主窗口只用于启动日志展示，dsh 一起好，主窗口就 hide 让位
-/// 给独立 dsh web 窗口（这是 Tauri 1.x 的硬限制——嵌入式 webview 不可用）。
-/// 用户可以：
-/// - 从系统托盘左键点击 → toggle 主窗口显隐（lib.rs `SystemTrayEvent::LeftClick`）
-/// - 或托盘菜单"打开主界面" → show 主窗口（lib.rs "open" 菜单项）
-///
-/// 该函数集中处理 hide 调用，所有 emit "service-ready" 之后都应调一次。
-fn auto_hide_main_window(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_window("main") {
-        if window.is_visible().unwrap_or(false) {
-            if window.hide().is_ok() {
-                let _ = app_handle.emit_all(
-                    "service-log",
-                    "[系统] dsh 已就绪，主窗口已隐藏到托盘（点击托盘图标可重新打开）"
-                        .to_string(),
-                );
-            }
-        }
-    }
 }
 
 impl ServiceManager {
@@ -90,49 +56,38 @@ impl ServiceManager {
         *count = 0;
     }
 
-    /// 清空上次启动抓到的 auth_url + 重置 ready_emitted CAS 标志位。
-    /// 服务重启（手动 stop+start / monitor 自动重启）时**必须调用**，
-    /// 否则新 dsh 进程的 token URL 被旧 CAS 跳过 emit，前端永远收不到第二次 service-ready
-    /// → 用了不匹配的新旧 URL → dsh 显示 "authentication required" 拒绝访问。
-    pub async fn reset_ready_state(&self) {
-        if let Ok(mut g) = self.auth_url.lock() {
-            *g = None;
-        }
-        self.ready_emitted.store(false, Ordering::SeqCst);
-    }
-
     /// 同步杀掉服务进程（退出时调用）
-    /// 关键优化：仅异步发起 taskkill /F /T 即返回，**绝不阻塞等待子进程退出**——
-    /// 之前最多等 2 秒的 try_wait 轮询正是「退出太慢」的元凶。
-    /// taskkill 作为独立 OS 进程会在后台把整个 dsh 进程树（cmd → npx → node → ...）清掉，
-    /// 应用进程可立即 app.exit，无需陪跑。
+    /// 关键优化：taskkill 改用 spawn 不再等 status，避免在 dsh 复杂进程树（cmd → npx → node → ...）下长时间阻塞
+    /// 整体加 2 秒硬上限，超时就不等了——进程会被系统或 taskkill /F 异步清理
     pub fn kill_service_blocking(&self) {
         self.is_restarting.store(true, Ordering::SeqCst);
         let mut process = self.process.blocking_lock();
-        if let Some(child) = process.take() {
+        if let Some(mut child) = process.take() {
             let pid = child.id();
-            // 先释放 Child 句柄，避免持有导致后续清理语义混乱
-            drop(child);
             #[cfg(target_os = "windows")]
             {
-                // spawn 异步发起 taskkill，不 wait status——后台静默清理进程树
+                // 用 spawn 异步发起 taskkill，不 wait status（taskkill /F 在大型进程树上偶尔会卡几秒）
                 let _ = std::process::Command::new("taskkill")
                     .args(["/T", "/F", "/PID", &pid.to_string()])
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .creation_flags(0x08000000)
                     .spawn();
+                // 给子进程最多 2 秒时间退出，超时不再等（避免退出很慢）
+                let start = std::time::Instant::now();
+                while start.elapsed() < std::time::Duration::from_secs(2) {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+                    }
+                }
+                // 即使超时也不 wait()——避免 hang 在 av/ntdll 锁
             }
             #[cfg(not(target_os = "windows"))]
             {
-                let _ = std::process::Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
+                let _ = child.kill();
+                let _ = child.wait();
             }
         }
-        // 立即返回，不 wait——让 app.exit 瞬发，不再 hang 在 av/ntdll 锁
     }
 }
 
@@ -158,12 +113,7 @@ pub async fn check_node() -> Result<String, String> {
     // 策略1：直接调用 node（PATH 中有 node 时生效）
     if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(3),
-        {
-            let mut c = AsyncCommand::new("node");
-            c.arg("--version");
-            hide_console(&mut c);
-            c.output()
-        },
+        AsyncCommand::new("node").arg("--version").output(),
     ).await {
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -175,27 +125,17 @@ pub async fn check_node() -> Result<String, String> {
     {
         if let Ok(Ok(output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new("cmd");
-                c.args(["/c", "node", "--version"]);
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new("cmd").args(["/c", "node", "--version"]).output(),
         ).await {
             if output.status.success() {
                 return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
             }
         }
 
-        // 策略3：用 where 命令查找 node 路径（std 同步调用，单独加隐藏标志）
+        // 策略3：用 where 命令查找 node 路径
         if let Ok(Ok(where_output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new("where");
-                c.arg("node");
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new("where").arg("node").output(),
         ).await {
             if where_output.status.success() {
                 let paths = String::from_utf8_lossy(&where_output.stdout);
@@ -203,12 +143,7 @@ pub async fn check_node() -> Result<String, String> {
                     let node_path = first_line.trim();
                     if let Ok(Ok(output)) = tokio::time::timeout(
                         Duration::from_secs(3),
-                        {
-                            let mut c = AsyncCommand::new(node_path);
-                            c.arg("--version");
-                            hide_console(&mut c);
-                            c.output()
-                        },
+                        AsyncCommand::new(node_path).arg("--version").output(),
                     ).await {
                         if output.status.success() {
                             return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -226,12 +161,7 @@ pub async fn check_node() -> Result<String, String> {
         for path in &common_paths {
             if let Ok(Ok(output)) = tokio::time::timeout(
                 Duration::from_secs(3),
-                {
-                    let mut c = AsyncCommand::new(path);
-                    c.arg("--version");
-                    hide_console(&mut c);
-                    c.output()
-                },
+                AsyncCommand::new(path).arg("--version").output(),
             ).await {
                 if output.status.success() {
                     return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -250,12 +180,7 @@ pub async fn check_node() -> Result<String, String> {
         };
         if let Ok(Ok(output)) = tokio::time::timeout(
             Duration::from_secs(3),
-            {
-                let mut c = AsyncCommand::new(shell);
-                c.args(["-c", "node --version"]);
-                hide_console(&mut c);
-                c.output()
-            },
+            AsyncCommand::new(shell).args(["-c", "node --version"]).output(),
         ).await {
             if output.status.success() {
                 return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
@@ -365,7 +290,6 @@ pub fn find_npx_launcher() -> Option<NpxLauncher> {
         // 策略 1：where node → 拿到 node.exe → 推导同目录 node_modules/npm/bin/npx-cli.js
         if let Ok(output) = std::process::Command::new("where")
             .arg("node")
-            .creation_flags(0x08000000)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
@@ -394,7 +318,6 @@ pub fn find_npx_launcher() -> Option<NpxLauncher> {
         // 策略 2：where npx → 如果有 npx.exe 则直接用
         if let Ok(output) = std::process::Command::new("where")
             .arg("npx")
-            .creation_flags(0x08000000)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
@@ -649,7 +572,6 @@ fn kill_process_tree(child: &mut Child) {
             .args(["/T", "/F", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(0x08000000)
             .status();
         let _ = child.wait();
     }
@@ -798,23 +720,13 @@ pub async fn start_service(
                 status.url = format!("http://127.0.0.1:{}", config.port);
                 let _ = app_handle.emit_all("service-status", status.clone());
             }
-            // 关键修复：PortProbe::Running 路径下启动器没 spawn dsh 也没 read_pipe，
-            // 无法拿到 token URL。如果 emit 裸 URL，前端会弹窗打开 dsh 但 dsh 会拒认证
-            // （"authentication required; reopen the URL printed by dsh web"）。
-            // 只更新状态不 emit service-ready，让用户去手动访问 dsh 自己打印的 URL。
+            let url = format!("http://127.0.0.1:{}", config.port);
+            let _ = app_handle.emit_all("service-ready", url);
             let _ = app_handle.emit_all(
                 "service-log",
-                format!(
-                    "[系统] 检测到端口 {} 已有 dsh 在运行（不是启动器启动的）— 启动器无法获取其 token URL，\
-                     请使用 dsh 自己打印的完整 URL（带 ?token=...）访问。已阻止前端弹出裸 URL 被 dsh 拒认证。",
-                    config.port
-                ),
+                "[系统] 服务已就绪（复用现有服务）".to_string(),
             );
-            crate::logger::log_to_file(
-                &install_dir,
-                "INFO",
-                "PortProbe::Running: 跳过 service-ready emit（无 token URL）",
-            );
+            crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪（复用现有服务）");
             return Ok(());
         }
         PortProbe::OccupiedByOther => {
@@ -977,7 +889,6 @@ pub async fn start_service(
                 .clone()
                 .unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
             let _ = handle_ready.emit_all("service-ready", url.clone());
-            auto_hide_main_window(&handle_ready);
             let _ = handle_ready.emit_all("service-log", "[系统] 服务已就绪".to_string());
             crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪");
         } else {
@@ -1092,22 +1003,15 @@ fn spawn_monitor(
                             let mut st = status.lock().await;
                             st.running = false;
                             let _ = app_handle.emit_all("service-status", st.clone());
-                            drop(st);
                             crate::logger::log_to_file(
                                 &install_dir,
                                 "ERROR",
-                                "自动重启已达最大次数，服务已停止（监控循环退出）",
+                                "自动重启已达最大次数，服务已停止",
                             );
                             let _ = app_handle.emit_all(
                                 "service-log",
-                                "[系统] 自动重启已达最大次数，服务已停止（监控循环退出）".to_string(),
+                                "[系统] 自动重启已达最大次数，服务已停止".to_string(),
                             );
-                            // 关键修复：break 跳出 monitor loop，整个 async task 死亡，proc MutexGuard 自动 drop，
-                            // process 锁自然释放，无需手动清空（也清不了——match arm 内 `proc.as_mut()` 借用了
-                            // proc 到 arm 结束，borrow check 阻止 mutate）。
-                            // 之前每 1 秒重复打一次 error 日志（"日志爆炸"）是因为没 break，下个循环又 try_wait
-                            // 同一个已退出 child 又触发同一个 else 分支。
-                            break;
                         }
                     }
                     Ok(None) => {}
@@ -1125,11 +1029,6 @@ async fn start_service_internal(
     status: Arc<Mutex<ServiceStatus>>,
     install_dir: PathBuf,
 ) -> Result<(), String> {
-    // 关键修复：服务重启（手动 restart / monitor 自动重启）时清空上次的 auth_url + 重置 ready_emitted CAS，
-    // 否则 read_pipe 抓到新 token URL 会被旧 CAS 跳过 emit → 前端永远不重弹 webview → 拒绝访问（用了旧 URL）。
-    let status_manager = app_handle.state::<ServiceManager>();
-    status_manager.reset_ready_state().await;
-
     let port = find_available_port(config.port).await?;
 
     if port != config.port {
@@ -1218,7 +1117,6 @@ async fn start_service_internal(
                 .clone()
                 .unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
             let _ = handle_ready.emit_all("service-ready", url.clone());
-            auto_hide_main_window(&handle_ready);
             let _ = handle_ready.emit_all("service-log", "[系统] 服务已就绪".to_string());
             crate::logger::log_to_file(&install_dir, "INFO", "服务已就绪");
         } else {
@@ -1249,7 +1147,6 @@ pub async fn stop_service(app_handle: AppHandle) -> Result<(), String> {
                 .args(["/T", "/F", "/PID", &pid.to_string()])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .creation_flags(0x08000000)
                 .status();
             let _ = child.wait();
         }
@@ -1402,7 +1299,6 @@ fn read_pipe<R: Read>(
                             "service-log",
                             "[系统] 已捕获 dsh 认证 URL，服务已就绪".to_string(),
                         );
-                        auto_hide_main_window(&app_handle);
                     }
                 } else if clean_line.contains("token=") {
                     // dsh 输出了 token 但没能提取成 URL（格式变化等），报警便于排查

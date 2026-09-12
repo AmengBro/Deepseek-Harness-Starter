@@ -1,4 +1,4 @@
-import { TauriApi, AppConfig, ReleaseInfo, UpdateCheckResult } from "../services/tauri-api";
+import { TauriApi, AppConfig, ReleaseInfo } from "../services/tauri-api";
 
 interface LogLine {
     text: string;
@@ -53,7 +53,6 @@ export class App {
         this.api.onServiceLog((log) => this.handleLog(log));
         this.api.onServiceReady((url) => this.handleReady(url));
         this.api.onUpdateAvailable((info) => this.showUpdateDialog(info));
-        this.api.onUpdateChecked((r) => this.handleUpdateStatus(r));
     }
 
     private applyTheme(theme: string): void {
@@ -136,33 +135,23 @@ export class App {
     }
 
     private handleReady(url: string): void {
-        // 调试：把实际收到的 URL 输出到日志区和控制台
-        console.log("[debug-handleReady] service-ready url:", url);
-        this.handleLog(`[调试] handleReady 收到 URL: ${url}`);
-
-        // 切换到 webview-view（空容器，dsh 在弹出的独立窗口中显示）
+        // 切换到 webview
         this.els.loadingView.classList.add("hidden");
         this.els.webviewView.classList.remove("hidden");
 
-        // Tauri 1.x 不支持嵌入式 webview，必须由 Rust 端 WindowBuilder 创建独立新窗口加载 dsh
-        this.handleLog("[系统] 正在弹出 dsh web 窗口...");
-        void this.api.openDshWebviewWindow(url)
-            .then(() => {
-                this.handleLog("[系统] dsh web 窗口已弹出");
-            })
-            .catch((err: unknown) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                this.handleLog(`[错误] 弹出 dsh web 窗口失败: ${msg}`);
-            });
+        const iframe = document.createElement("iframe");
+        iframe.src = url;
+        iframe.style.border = "none";
+        iframe.style.width = "100%";
+        iframe.style.height = "100%";
+        this.els.webviewView.appendChild(iframe);
     }
 
     private async checkUpdates(): Promise<void> {
         try {
             await this.api.checkForUpdates();
-        } catch (err) {
-            // 不再静默吞掉：把失败打到日志面板，方便排查「检查更新无反应」
-            const msg = err instanceof Error ? err.message : String(err);
-            this.handleLog(`[警告] 检查更新失败: ${msg}`);
+        } catch {
+            // 静默失败
         }
     }
 
@@ -186,17 +175,6 @@ export class App {
             dialog.remove();
         });
         dialog.querySelector("#btn-later")?.addEventListener("click", () => dialog.remove());
-    }
-
-    /// 检查更新后的统一状态展示：无论「有更新 / 已最新 / 出错」都打一行日志，让用户明确知道结果
-    private handleUpdateStatus(r: UpdateCheckResult): void {
-        if (r.error) {
-            this.handleLog(`[更新] 检查更新失败：${r.error}`);
-        } else if (r.update_available) {
-            this.handleLog(`[更新] 发现新版本 —— GitHub 最新版本：${r.latest}（当前 ${r.current}）`);
-        } else {
-            this.handleLog(`[更新] 已是最新 —— GitHub 最新版本：${r.latest}（当前 ${r.current}）`);
-        }
     }
 
     private showNodeMissingDialog(): void {

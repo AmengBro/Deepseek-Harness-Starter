@@ -5,7 +5,17 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdout, Command, Stdio};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Manager};
+
+/// 在 Windows 下隐藏子进程控制台窗口（避免打开设置/检测依赖时黑窗闪过），非 Windows 为空操作。
+#[cfg(target_os = "windows")]
+fn hide_console_sync(cmd: &mut Command) {
+    cmd.creation_flags(0x08000000);
+}
+#[cfg(not(target_os = "windows"))]
+fn hide_console_sync(_cmd: &mut Command) {}
 
 const PROFILE: &str = "web";
 const EXTENSION_EVENT: &str = "extension-log";
@@ -32,7 +42,10 @@ fn profile_dir() -> Result<PathBuf, String> {
 fn enhanced_path() -> String {
     let mut path = std::env::var("PATH").unwrap_or_default();
     // 追加 npm 全局 bin（pnpm 经 npm install -g 后通常在此目录，确保 dsh 内部能找到 pnpm）
-    if let Ok(out) = Command::new("npm").args(["bin", "-g"]).output() {
+    let mut npm_bin_cmd = Command::new("npm");
+    npm_bin_cmd.args(["bin", "-g"]);
+    hide_console_sync(&mut npm_bin_cmd);
+    if let Ok(out) = npm_bin_cmd.output() {
         if out.status.success() {
             let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !dir.is_empty() && !path_contains(&path, &dir) {
@@ -56,7 +69,10 @@ fn path_contains(path: &str, dir: &str) -> bool {
 
 /// 确保 pnpm 可用：已检测到则跳过；否则用 npm 全局安装（绝不升级/重装已有版本）
 async fn ensure_pnpm(app: &AppHandle) -> Result<(), String> {
-    if let Ok(out) = Command::new("pnpm").arg("--version").output() {
+    let mut pnpm_ver = Command::new("pnpm");
+    pnpm_ver.arg("--version");
+    hide_console_sync(&mut pnpm_ver);
+    if let Ok(out) = pnpm_ver.output() {
         if out.status.success() {
             let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
             emit_log(app, &format!("[依赖] 已检测到 pnpm {}", v));
@@ -104,7 +120,10 @@ async fn ensure_pnpm(app: &AppHandle) -> Result<(), String> {
 
 /// 确保 git 可用：已检测到则跳过；否则用 winget 安装 Git for Windows
 async fn ensure_git(app: &AppHandle) -> Result<(), String> {
-    if let Ok(out) = Command::new("git").arg("--version").output() {
+    let mut git_ver = Command::new("git");
+    git_ver.arg("--version");
+    hide_console_sync(&mut git_ver);
+    if let Ok(out) = git_ver.output() {
         if out.status.success() {
             let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
             emit_log(app, &format!("[依赖] 已检测到 git {}", v));
@@ -113,15 +132,16 @@ async fn ensure_git(app: &AppHandle) -> Result<(), String> {
     }
 
     emit_log(app, "[依赖] 未检测到 git，正在通过 winget 安装 Git for Windows...");
-    let status = Command::new("winget")
-        .args([
-            "install",
-            "Git.Git",
-            "--silent",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-        ])
-        .status();
+    let mut winget_cmd = Command::new("winget");
+    winget_cmd.args([
+        "install",
+        "Git.Git",
+        "--silent",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+    ]);
+    hide_console_sync(&mut winget_cmd);
+    let status = winget_cmd.status();
     match status {
         Ok(s) if s.success() => {
             emit_log(

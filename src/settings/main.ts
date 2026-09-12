@@ -1,4 +1,4 @@
-import { TauriApi, AppConfig, McpServerInput, ExtensionInfo } from "../services/tauri-api";
+import { TauriApi, AppConfig, McpServerInput, ExtensionInfo, UpdateCheckResult } from "../services/tauri-api";
 import { getVersion } from "@tauri-apps/api/app";
 
 const api = new TauriApi();
@@ -124,21 +124,53 @@ async function init(): Promise<void> {
         }
     });
 
-    // 检查更新（壳程序自身）
+    // 检查更新（壳程序自身）—— 在按钮下方显示一行状态（GitHub 最新版本 / 已最新 / 错误），避免无反馈
+    const appUpdateStatus = (() => {
+        let el = document.getElementById("app-update-status") as HTMLSpanElement | null;
+        if (!el) {
+            el = document.createElement("span");
+            el.id = "app-update-status";
+            el.className = "update-status";
+            el.style.display = "block";
+            el.style.marginTop = "6px";
+            el.style.fontSize = "12px";
+            el.style.minHeight = "16px";
+            btnCheckUpdate.insertAdjacentElement("afterend", el);
+        }
+        return el;
+    })();
+
+    const renderUpdateStatus = (r: UpdateCheckResult): void => {
+        if (r.error) {
+            appUpdateStatus.textContent = `检查更新失败：${r.error}`;
+            appUpdateStatus.style.color = "var(--error, #e5484d)";
+        } else if (r.update_available) {
+            appUpdateStatus.textContent = `GitHub 最新版本：${r.latest}（当前 ${r.current}）— 有更新可用`;
+            appUpdateStatus.style.color = "var(--success, #46a758)";
+        } else {
+            appUpdateStatus.textContent = `GitHub 最新版本：${r.latest}（当前 ${r.current}）— 已是最新`;
+            appUpdateStatus.style.color = "var(--text-muted, #888)";
+        }
+    };
+
+    // 统一状态回报（无论成功/已最新/出错都会触发，写入状态行）
+    api.onUpdateChecked((r) => renderUpdateStatus(r));
+
     btnCheckUpdate.addEventListener("click", async () => {
         btnCheckUpdate.disabled = true;
         const originalText = btnCheckUpdate.innerHTML;
         btnCheckUpdate.textContent = "检查中...";
+        appUpdateStatus.textContent = "正在检查更新...";
+        appUpdateStatus.className = "update-status";
         try {
             const result = await api.checkForUpdates();
             if (result) {
-                alert(`发现新版本 ${result.version}！\n即将打开下载页面...`);
-                await api.openUrl(result.html_url);
-            } else {
-                alert("当前已是最新版本");
+                const go = confirm(`发现新版本 ${result.version}！\n是否前往下载页面？`);
+                if (go) await api.openUrl(result.html_url);
             }
+            // 已是最新 / 出错 的统一反馈由 update-checked 事件写入状态行
         } catch {
-            alert("检查更新失败，请稍后重试");
+            // 错误详情由 update-checked 事件写入状态行
         } finally {
             btnCheckUpdate.disabled = false;
             btnCheckUpdate.innerHTML = originalText;
@@ -151,7 +183,9 @@ async function init(): Promise<void> {
             const info = await api.checkDshVersion();
             dshCurrent.textContent = info.current;
             dshLatest.textContent = info.latest;
-            if (info.latest === "unknown") {
+            if (info.current === "unknown") {
+                dshStatus.textContent = "未安装";
+            } else if (info.latest === "unknown") {
                 dshStatus.textContent = "检测失败";
             } else if (info.needs_update) {
                 dshStatus.textContent = "有更新可用";

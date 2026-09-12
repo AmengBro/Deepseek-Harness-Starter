@@ -6,8 +6,8 @@ DeepSeek Harness 一键启动器 —— 基于 Tauri 的轻量级跨平台桌面
 
 ## 功能特性
 
-- 一键启动 `npx @deepseek-ai/dsh web`，stdout/stderr 实时显示在主界面日志区
-- 智能依赖管理：`npx` 超过 10 秒未就绪时，自动切换为 `npm install -g @deepseek-ai/dsh --verbose` 全局安装，下载全过程（npm 详细日志）实时反馈到日志区，避免用户误以为程序卡死
+- 一键启动 `dsh web`，stdout/stderr 实时显示在主界面日志区
+- 精确依赖探测：启动前检查全局 `dsh` 命令，仅在未安装时执行 `npm install -g @deepseek-ai/dsh@latest --verbose`，安装日志实时反馈到日志区
 - Node.js 自动检测（多策略定位 `node.exe`）
 - 内嵌 WebView 展示服务界面（默认端口 3080）
 - 系统托盘常驻：右键菜单提供「打开主界面 / 设置 / 退出」
@@ -51,7 +51,7 @@ dotnet publish setup/DeepseekHarness.Setup/DeepseekHarness.Setup.csproj -c Relea
 ## 使用说明
 
 1. 首次启动时工具会自动检测 Node.js；若未安装，会提示前往 [nodejs.org](https://nodejs.org) 下载。
-2. 点击「启动服务」，工具自动执行 `npx` 启动 dsh；若判定需要下载依赖，会自动切换到 npm 全局安装并实时显示进度。
+2. 点击「启动服务」，工具检测到 `dsh` 后直接执行 `dsh web`；若未安装，则先通过 npm 全局安装并实时显示进度。
 3. 服务就绪后自动打开内嵌界面。
 4. 点击主窗口关闭按钮会隐藏到系统托盘，右键托盘图标可打开主界面、设置或退出。
 
