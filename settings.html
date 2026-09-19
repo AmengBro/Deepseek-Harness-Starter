@@ -15,100 +15,76 @@
 
         /* 左侧导航 */
         .settings-nav {
-            width: 148px;
+            width: 152px;
             flex-shrink: 0;
-            padding: 16px 8px;
-            border-right: 1px solid var(--border);
+            padding: 12px 8px;
+            border-right: 1px solid var(--divider);
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 2px;
         }
+        /* WinUI NavigationView：选中项用左侧 3px 强调色竖条指示，而非整块填充 */
         .nav-item {
+            position: relative;
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 9px 12px;
+            height: 36px;
+            padding: 0 12px;
             border: none;
-            border-radius: 8px;
+            border-radius: var(--r-control);
             background: transparent;
-            color: var(--fg);
+            color: var(--text-1);
             font-size: 13px;
             font-family: var(--sans);
             cursor: pointer;
             text-align: left;
-            transition: background 0.12s;
+            transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
         }
-        .nav-item svg { width: 14px; height: 14px; opacity: 0.7; flex-shrink: 0; }
-        .nav-item:hover { background: var(--surface-hover); }
+        .nav-item svg { width: 16px; height: 16px; color: var(--text-2); flex-shrink: 0; }
+        .nav-item:hover { background: var(--subtle); }
         .nav-item.active {
-            background: var(--accent);
-            color: var(--accent-fg);
+            background: var(--subtle);
+            color: var(--text-1);
             font-weight: 600;
         }
-        .nav-item.active svg { opacity: 1; }
+        .nav-item.active::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 16px;
+            border-radius: var(--r-pill);
+            background: var(--accent);
+        }
+        .nav-item.active svg { color: var(--accent); }
 
         /* 右侧内容 */
         .settings-content {
             flex: 1;
-            padding: 20px 22px 28px;
+            padding: 24px 24px 32px;
             overflow-y: auto;
         }
+        /* Subtitle：20px / 600 */
         .settings-title {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 600;
+            letter-spacing: 0.01em;
             margin-bottom: 16px;
             display: flex;
             align-items: center;
             gap: 8px;
+            color: var(--text-1);
         }
-        .settings-title svg { width: 17px; height: 17px; }
+        .settings-title svg { width: 18px; height: 18px; color: var(--accent); }
 
         .panel { display: none; }
         .panel.active { display: block; }
 
-        /* 面板内卡片 */
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 16px 18px;
-            margin-bottom: 16px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-        }
-        :root[data-theme="dark"] .card { box-shadow: none; }
-        .card-title {
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            opacity: 0.9;
-        }
-        .card-title svg { width: 13px; height: 13px; opacity: 0.7; }
+        /* 卡片 / 行 / 日志 已统一交由 src/style.css 的 Acrylic 卡片样式接管 */
 
-        .card-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 7px 0;
-            font-size: 13px;
-        }
-        .card-row + .card-row { border-top: 1px solid var(--border); }
-        .card-row .label { color: var(--fg); }
-        .card-row .value {
-            color: var(--fg);
-            opacity: 0.6;
-            font-size: 12px;
-            font-family: var(--mono);
-        }
-        .card-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-            margin-top: 12px;
-        }
         .settings-actions {
             display: flex;
             justify-content: flex-end;
@@ -120,10 +96,9 @@
         .inline-group {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 16px;
         }
-        .inline-group .settings-label { font-size: 11px; margin-bottom: 4px; opacity: 0.75; }
-        .settings-log { margin-top: 12px; max-height: 150px; overflow: auto; font-family: var(--mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; white-space: pre-wrap; word-break: break-all; line-height: 1.4; }
+        .inline-group .settings-label { font-size: 12px; }
     </style>
 </head>
 <body>
@@ -199,6 +174,17 @@
                     <div class="card-row">
                         <span class="label">检查更新</span>
                         <button id="btn-check-update" class="btn">检查</button>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">npm 源</span>
+                        <select id="npm-registry-select" class="settings-select" style="width:auto;min-width:200px;height:30px;">
+                            <option value="mirror">国内镜像（npmmirror）</option>
+                            <option value="official">官方源（npmjs.org）</option>
+                        </select>
+                    </div>
+                    <div class="card-row">
+                        <span class="label">网络环境</span>
+                        <span class="value" id="npm-network-text">检测中...</span>
                     </div>
                     <div class="card-row">
                         <span class="label">Node.js</span>

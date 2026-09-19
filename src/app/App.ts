@@ -31,6 +31,8 @@ export class App {
         this.applyTheme("system");
         this.setupEventListeners();
         await this.loadConfig();
+        // 后台执行：国内网络下该检测最多等 3 秒，不能阻塞服务启动
+        void this.ensureNpmMirror();
         await this.autoStart();
     }
 
@@ -44,9 +46,11 @@ export class App {
     }
 
     private bindEvents(): void {
-        this.els.btnMinimize.addEventListener("click", () => this.api.minimizeWindow());
-        this.els.btnMaximize.addEventListener("click", () => this.api.maximizeWindow());
-        this.els.btnClose.addEventListener("click", () => this.api.closeWindow());
+        // 已改用系统原生标题栏：index.html 里自绘的最小化/最大化/关闭按钮已移除。
+        // 这里保留逻辑并做判空保护——元素不存在时静默跳过，日后若要切回自绘标题栏无需改代码。
+        this.els.btnMinimize?.addEventListener("click", () => this.api.minimizeWindow());
+        this.els.btnMaximize?.addEventListener("click", () => this.api.maximizeWindow());
+        this.els.btnClose?.addEventListener("click", () => this.api.closeWindow());
     }
 
     private setupEventListeners(): void {
@@ -70,6 +74,17 @@ export class App {
             this.applyTheme(this.config.theme || "system");
         } catch {
             // 使用默认配置
+        }
+    }
+
+    /// 启动服务前先保障 npm 源可用：官方源 + 国内网络 → 自动切国内镜像。
+    /// 结果日志由 Rust 端通过 service-log 事件回传（切换/失败时才发），此处不重复打印，
+    /// 仅兜住异常，绝不因镜像检测失败阻断主流程。
+    private async ensureNpmMirror(): Promise<void> {
+        try {
+            await this.api.ensureNpmMirror();
+        } catch (err) {
+            this.handleLog(`[警告] npm 源检测失败（不影响启动）: ${err}`);
         }
     }
 

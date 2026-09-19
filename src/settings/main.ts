@@ -177,6 +177,43 @@ async function init(): Promise<void> {
         }
     });
 
+    // ---- npm 源：显示当前源 + 网络环境判定，可手动在官方源/国内镜像间切换 ----
+    const npmSelect = document.getElementById("npm-registry-select") as HTMLSelectElement;
+    const npmNetwork = document.getElementById("npm-network-text") as HTMLSpanElement;
+
+    const describeNetwork = (inChina: boolean): string =>
+        inChina ? "国内网络（建议用镜像）" : "境外网络（可直连官方源）";
+
+    const refreshNpmRegistry = async (): Promise<void> => {
+        try {
+            const info = await api.getNpmRegistry();
+            npmSelect.value = info.is_official ? "official" : "mirror";
+            npmNetwork.textContent = describeNetwork(info.in_china);
+        } catch {
+            npmNetwork.textContent = "检测失败";
+        }
+    };
+
+    npmSelect.addEventListener("change", async () => {
+        // Rust 端按 URL 关键字判定，必须传完整 URL 而非 "official"/"mirror"
+        const target =
+            npmSelect.value === "official"
+                ? "https://registry.npmjs.org"
+                : "https://registry.npmmirror.com";
+        npmSelect.disabled = true;
+        try {
+            const info = await api.setNpmRegistry(target);
+            npmNetwork.textContent = describeNetwork(info.in_china);
+        } catch (err) {
+            alert(`切换 npm 源失败: ${err}`);
+        } finally {
+            npmSelect.disabled = false;
+            await refreshNpmRegistry();
+        }
+    });
+
+    refreshNpmRegistry();
+
     // ---- DeepSeek Harness (dsh) 自动更新 ----
     const refreshDshInfo = async (): Promise<void> => {
         try {

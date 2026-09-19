@@ -101,6 +101,14 @@ impl ServiceManager {
         self.ready_emitted.store(false, Ordering::SeqCst);
     }
 
+    /// 只读取当前已就绪的 dsh 认证 URL（含 token），**同步、不阻塞**。
+    /// 供系统托盘「打开主界面」直接打开/聚焦 dsh 窗口使用：
+    /// - Some(url)：dsh 已就绪 → 托盘点击直达 dsh 界面（不再显示启动日志窗口）
+    /// - None：服务还没起来 → 退回显示主窗口（可看日志 / 手动启动）
+    pub fn get_auth_url(&self) -> Option<String> {
+        self.auth_url.lock().ok().and_then(|g| g.clone())
+    }
+
     /// 同步杀掉服务进程（退出时调用）
     /// 关键优化：仅异步发起 taskkill /F /T 即返回，**绝不阻塞等待子进程退出**——
     /// 之前最多等 2 秒的 try_wait 轮询正是「退出太慢」的元凶。

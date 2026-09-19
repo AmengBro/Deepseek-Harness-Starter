@@ -139,3 +139,10 @@ dist
 # .NET setup project
 setup/**/bin/
 setup/**/obj/
+
+# 改前本地快照（*.bak.YYYYMMDD / *.bak.YYYYMMDDb）：仅本地留存便于回滚，不进版本历史
+*.bak.*
+
+# pnpm 副产物：本项目用 npm 管理依赖，这两个由本地 pnpm 调用自动生成，与项目无关
+pnpm-lock.yaml
+pnpm-workspace.yaml

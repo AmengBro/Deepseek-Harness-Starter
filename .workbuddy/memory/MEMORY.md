@@ -44,6 +44,19 @@ dsh web 服务必须"内嵌到主窗口"展示（UX 体验），但 Tauri 1.x �
   - `src/services/tauri-api.ts` — 前端 IPC wrapper
   - `src/app/App.ts` — 前端入口
 
+## UI 风格基线（2026-09-19 确立）
+
+- **设计体系**：WinUI 3 / Fluent（用户指定 `winui-web-design` skill，其在多个项目中复用同一套）
+- **令牌来源**：WinUIonWeb 仓库 `src/styles/theme.css`，经 skill 的 `references/winui-design-language.md` 落地（**查证后再写，不臆造色值**）
+- **落地位置**：`src/style.css`（全局令牌 + 组件）、`settings.html` 内联 `<style>`（仅布局与侧栏）
+- **核心值**：强调蓝 `#0067C0` / 深色 `#4CC2FF`；圆角 控件 4 / 卡片 8 / 胶囊 999；
+  动效 `--fast 0.167s`、`--normal 0.2s`、`cubic-bezier(0,0,0,1)`；控件高 32px（紧凑）
+- **材质**：Mica（html 壁纸渐变 + body 半透明 blur 60px）、Acrylic（卡片 blur 30px）
+  ⚠️ `backdrop-filter` 背后必须有内容才可见，壁纸层不能省
+- **改造红线**：只动视觉层，**不改 class/id 名称、不改 TS/Rust/IPC**
+  （第十轮已验证：样式重写后 App.ts / settings/main.ts / tauri-api.ts / lib.rs 时间戳仍停在改动前）
+- **改前必备份** `*.bak.YYYYMMDD`；第十轮备份：`style.css.bak.20260919`、`index.html.bak.20260919`、`settings.html.bak.20260919`
+
 ## 关键修复里程碑
 
 ### dsh web 启动 + 认证修复（2026-09-05/06 多轮迭代）

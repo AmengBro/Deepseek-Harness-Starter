@@ -242,3 +242,163 @@ pub async fn update_dsh(app_handle: AppHandle) -> Result<String, String> {
     );
     Ok(new_ver)
 }
+
+/* ==================== npm 镜像自动切换（面向国内小白用户） ==================== */
+
+/// npm 官方源
+const NPM_OFFICIAL: &str = "https://registry.npmjs.org";
+/// 国内镜像源（淘宝 npmmirror，实测比官方快 6-7 倍）
+const NPM_MIRROR: &str = "https://registry.npmmirror.com";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NpmRegistryInfo {
+    /// 当前生效的 npm 源
+    pub registry: String,
+    /// 是否判定为国内网络（连不通境外站点）
+    pub in_china: bool,
+    /// 当前是否为官方源
+    pub is_official: bool,
+    /// 本次调用是否发生了自动切换
+    pub switched: bool,
+    /// 读取/写入失败时的错误信息
+    pub error: Option<String>,
+}
+
+/// Windows 下隐藏子进程控制台窗口（npm 是 node 脚本，直接 spawn 会闪黑窗）；其他平台空操作
+#[cfg(target_os = "windows")]
+fn hide_console_cmd(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x08000000);
+}
+#[cfg(not(target_os = "windows"))]
+fn hide_console_cmd(_cmd: &mut Command) {}
+
+/// 读取当前 npm 源（等价 `npm config get registry`）
+fn read_npm_registry() -> Result<String, String> {
+    let mut cmd = Command::new("npm");
+    cmd.args(["config", "get", "registry"]);
+    hide_console_cmd(&mut cmd);
+    match cmd.output() {
+        Ok(out) => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),
+        Err(e) => Err(format!("执行 npm config get registry 失败: {}", e)),
+    }
+}
+
+/// 写入 npm 源（等价 `npm config set registry <url>`，写入用户级 ~/.npmrc）
+fn write_npm_registry(url: &str) -> Result<(), String> {
+    let mut cmd = Command::new("npm");
+    cmd.args(["config", "set", "registry", url]);
+    hide_console_cmd(&mut cmd);
+    match cmd.output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => Err(format!(
+            "npm config set 失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+        Err(e) => Err(format!("执行 npm config set 失败: {}", e)),
+    }
+}
+
+/// 判定是否处于国内网络：尝试连接境外站点 chatgpt.com。
+/// - 连不通（超时/失败）→ 判定为国内，需要镜像
+/// - 能连通 → 说明出口在境外或有全局代理，npm 官方源同样可用，无需切换
+/// 用 HTTP 请求而非 ICMP ping：ping 常被防火墙丢弃，HTTP 判定更贴近真实下载场景。
+async fn detect_in_china() -> bool {
+    // 3 秒足够判定：境外通常 1 秒内响应，国内则连接超时。
+    // 这个检测在启动链路里执行，超时设太长会明显拖慢启动。
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return true, // 建不出客户端，保守按国内处理
+    };
+    client.get("https://chatgpt.com").send().await.is_err()
+}
+
+/// 查询当前 npm 源信息（不改任何配置，纯读取）
+#[tauri::command]
+pub async fn get_npm_registry() -> Result<NpmRegistryInfo, String> {
+    let registry = read_npm_registry()?;
+    let in_china = detect_in_china().await;
+    Ok(NpmRegistryInfo {
+        is_official: registry.contains("registry.npmjs.org"),
+        registry,
+        in_china,
+        switched: false,
+        error: None,
+    })
+}
+
+/// 自动保障 npm 源可用：**官方源 + 国内网络** 时自动切到国内镜像。
+///
+/// 设计考量：
+/// - 只在这两个条件同时满足时才动配置，已配镜像或身在境外的用户**不受任何影响**
+/// - 写入的是用户级 `~/.npmrc`，对小白是净收益（后续所有 npm/pnpm 操作都加速）
+/// - 切换结果通过 `service-log` 事件回传前端，用户可见
+#[tauri::command]
+pub async fn ensure_npm_mirror(app_handle: AppHandle) -> Result<NpmRegistryInfo, String> {
+    let current = read_npm_registry()?;
+    let in_china = detect_in_china().await;
+    let is_official = current.contains("registry.npmjs.org");
+
+    let mut registry = current;
+    let mut switched = false;
+    let mut error: Option<String> = None;
+
+    if in_china && is_official {
+        match write_npm_registry(NPM_MIRROR) {
+            Ok(_) => {
+                switched = true;
+                registry = NPM_MIRROR.to_string();
+                let msg = format!(
+                    "[系统] 检测到国内网络且 npm 使用官方源，已自动切换到国内镜像: {}",
+                    NPM_MIRROR
+                );
+                let _ = app_handle.emit_all("service-log", msg);
+            }
+            Err(e) => {
+                error = Some(e.clone());
+                let msg = format!("[警告] 自动切换 npm 镜像失败，可手动执行：npm config set registry {}", NPM_MIRROR);
+                let _ = app_handle.emit_all("service-log", msg);
+            }
+        }
+    }
+
+    Ok(NpmRegistryInfo {
+        is_official: registry.contains("registry.npmjs.org"),
+        registry,
+        in_china,
+        switched,
+        error,
+    })
+}
+
+/// 手动设置 npm 源（供设置页下拉切换：官方源 / 国内镜像）
+#[tauri::command]
+pub async fn set_npm_registry(
+    app_handle: AppHandle,
+    registry: String,
+) -> Result<NpmRegistryInfo, String> {
+    // 仅允许在两个已知源之间切换，避免注入 arbitrary URL
+    let target = if registry.contains("npmjs.org") {
+        NPM_OFFICIAL
+    } else if registry.contains("npmmirror") {
+        NPM_MIRROR
+    } else {
+        return Err("不支持的 npm 源，仅允许官方源或 npmmirror".to_string());
+    };
+
+    write_npm_registry(target)?;
+    let msg = format!("[系统] npm 源已切换为: {}", target);
+    let _ = app_handle.emit_all("service-log", msg);
+
+    let in_china = detect_in_china().await;
+    Ok(NpmRegistryInfo {
+        is_official: target == NPM_OFFICIAL,
+        registry: target.to_string(),
+        in_china,
+        switched: true,
+        error: None,
+    })
+}

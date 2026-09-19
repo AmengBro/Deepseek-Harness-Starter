@@ -49,23 +49,12 @@ pub fn run() {
         .on_system_tray_event(|app, event| {
             match event {
                 SystemTrayEvent::LeftClick { .. } => {
-                    if let Some(window) = app.get_window("main") {
-                        let is_visible = window.is_visible().unwrap_or(false);
-                        if is_visible {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    open_main_or_dsh(app);
                 }
                 SystemTrayEvent::MenuItemClick { id, .. } => {
                     match id.as_str() {
                         "open" => {
-                            if let Some(window) = app.get_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            open_main_or_dsh(app);
                         }
                         "settings" => {
                             if let Err(e) = open_settings_inner(app) {
@@ -108,6 +97,9 @@ pub fn run() {
             commands::update::check_for_updates,
             commands::dsh::check_dsh_version,
             commands::dsh::update_dsh,
+            commands::dsh::get_npm_registry,
+            commands::dsh::ensure_npm_mirror,
+            commands::dsh::set_npm_registry,
             open_settings_window,
             open_dsh_webview_window,
             open_log_folder,
@@ -209,6 +201,50 @@ fn bring_existing_to_front() {
         if target_thread != 0 && target_thread != curr {
             let _ = AttachThreadInput(curr, target_thread, 0);
         }
+    }
+}
+
+/// 托盘「打开主界面」与左键点击的统一入口。
+///
+/// 设计前提：dsh 就绪后主窗口就废弃了（已自动隐藏到托盘），**主界面 = dsh web 窗口**。
+/// - 已抓到带 token 的认证 URL → 直接打开（或聚焦已有的）dsh web 窗口，不再显示启动日志窗口
+/// - 尚未就绪 → 显示主窗口，让用户看到启动日志并可手动启动
+///
+/// 失败兜底：dsh 窗口创建失败时退回显示主窗口，保证用户永远有界面可操作。
+/// 注：托盘事件回调运行在**主线程**，因此可直接调用 WindowBuilder（与「设置」菜单一致）。
+fn open_main_or_dsh(app: &tauri::AppHandle) {
+    let auth_url = app
+        .try_state::<ServiceManager>()
+        .and_then(|state| state.get_auth_url());
+
+    match auth_url {
+        Some(url) => {
+            logger::log_to_file(&get_install_dir(), "INFO", "托盘：dsh 已就绪，直接打开 dsh 窗口");
+            if let Err(e) = open_dsh_webview_inner(app, &url) {
+                logger::log_to_file(
+                    &get_install_dir(),
+                    "ERROR",
+                    &format!("托盘打开 dsh 窗口失败，退回主窗口: {}", e),
+                );
+                show_main_window(app);
+            }
+        }
+        None => {
+            logger::log_to_file(
+                &get_install_dir(),
+                "INFO",
+                "托盘：dsh 尚未就绪，显示主窗口（启动日志）",
+            );
+            show_main_window(app);
+        }
+    }
+}
+
+/// 显示并聚焦主窗口（启动日志窗口）
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 

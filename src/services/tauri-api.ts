@@ -39,6 +39,20 @@ export interface DshVersionInfo {
     source: string;
 }
 
+/** npm 源状态：用于「国内网络自动切镜像」与设置页手动切换 */
+export interface NpmRegistryInfo {
+    /** 当前生效的 npm 源 */
+    registry: string;
+    /** 是否判定为国内网络 */
+    in_china: boolean;
+    /** 当前是否官方源 */
+    is_official: boolean;
+    /** 本次是否发生了切换 */
+    switched: boolean;
+    /** 失败原因；成功时 undefined */
+    error?: string;
+}
+
 export interface McpServerEntry {
     id: string;
     server_name: string;
@@ -103,6 +117,23 @@ export class TauriApi {
 
     async updateDsh(): Promise<string> {
         return invoke<string>("update_dsh");
+    }
+
+    // ---- npm 源：国内网络自动切镜像，避免小白装 dsh / 扩展时卡在下载 ----
+
+    /** 只读取当前 npm 源，不改动任何配置 */
+    async getNpmRegistry(): Promise<NpmRegistryInfo> {
+        return invoke<NpmRegistryInfo>("get_npm_registry");
+    }
+
+    /** 官方源 + 国内网络 时自动切到国内镜像；其他情况不动配置 */
+    async ensureNpmMirror(): Promise<NpmRegistryInfo> {
+        return invoke<NpmRegistryInfo>("ensure_npm_mirror");
+    }
+
+    /** 手动切换 npm 源（设置页下拉用），仅允许官方源 / npmmirror 两者 */
+    async setNpmRegistry(registry: string): Promise<NpmRegistryInfo> {
+        return invoke<NpmRegistryInfo>("set_npm_registry", { registry });
     }
 
     async openSettings(): Promise<void> {

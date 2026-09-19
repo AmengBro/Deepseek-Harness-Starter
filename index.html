@@ -7,27 +7,8 @@
     <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-    <!-- 标题栏 -->
-    <div class="titlebar" data-tauri-drag-region>
-        <div class="titlebar-title">
-            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8 1L2 4V8C2 11.3 4.4 14.4 8 15C11.6 14.4 14 11.3 14 8V4L8 1Z" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                <path d="M5.5 8L7 9.5L10.5 6" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>DeepseekHarness</span>
-        </div>
-        <div class="titlebar-controls">
-            <button id="btn-minimize" class="win-btn" title="最小化">
-                <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" stroke-width="1"/></svg>
-            </button>
-            <button id="btn-maximize" class="win-btn" title="最大化">
-                <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-            </button>
-            <button id="btn-close" class="win-btn close" title="关闭">
-                <svg viewBox="0 0 12 12"><line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke="currentColor" stroke-width="1"/><line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke="currentColor" stroke-width="1"/></svg>
-            </button>
-        </div>
-    </div>
+    <!-- 标题栏：已改用系统原生标题栏（tauri.conf.json → windows[0].decorations = true）。
+         原先自绘的 .titlebar（含最小化/最大化/关闭按钮）在此移除，窗口控制与拖拽由系统提供。 -->
 
     <!-- 加载态：终端日志 -->
     <div id="loading-view" class="loading-view">
