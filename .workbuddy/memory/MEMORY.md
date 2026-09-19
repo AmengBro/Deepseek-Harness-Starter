@@ -111,6 +111,18 @@ src/app/App.ts.bak.20260906                           # webview 改写前
 index.html.bak.20260906                               # <webview> 标签加之前
 ```
 
+## Git 提交约定（2026-09-19 确立）
+
+- **共同作者标记**：提交说明结尾追加一行
+  `Co-authored-by: WorkBuddy <noreply@workbuddy.cn>`（用户指定，每次提交都要带）
+- **本地备份不进版本历史**：`.gitignore` 已含 `*.bak.*`，改前快照只留本地便于回滚
+- **pnpm 副产物忽略**：`pnpm-lock.yaml` / `pnpm-workspace.yaml`（本项目用 npm 管理依赖，
+  这两个由本地 pnpm 调用自动生成，与项目无关）
+- **版本号变更必须同步四处**：`package.json`、`src-tauri/tauri.conf.json`（更新检测唯一真相源）、
+  `src-tauri/Cargo.toml`、`package-lock.json`（2 处）
+  ⚠️ `package-lock.json` 不可用 replace_all，会改坏同名依赖（如 `source-map-js@1.2.1`）
+- 提交前先 `git add -A` 再 `git status --short` 校验暂存区，确认无误暂存
+
 ## 用户沟通偏好
 
 - 简洁直接，结论先行

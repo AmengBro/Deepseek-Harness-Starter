@@ -34,6 +34,20 @@
 - Mica / Acrylic 依赖 WebView2 对 `backdrop-filter` 的支持，个别老旧设备可能降级为半透明（不影响使用）
 - git 源扩展安装仍需手动在 `pnpm-workspace.yaml` 的 `allowBuilds` 放行（添加前有提示）
 
+## 📦 下载
+
+| 文件 | 架构 | 平台 | 类型 | 备注 |
+| -- | -- | -- | -- | -- |
+| `DeepseekHarness_1.3.0_x64-setup.exe` | x64 | windows | 安装包 | NSIS 安装器（约 3.8 MB） |
+| `DeepseekHarness.Setup.exe` | x64 | windows | 安装包 | MewUI 安装器（约 39 MB，已启用单文件压缩） |
+
+> 💡 **国内用户建议直接下载 NSIS 版本**：体积仅约 3.8 MB，而 MewUI 安装器约 39 MB（大 10 倍），墙内下载会明显更慢。
+>
+> 注：MewUI 安装器本版起启用 .NET 单文件压缩（`EnableCompressionInSingleFile`），
+> 体积由 80 MB 降至 39 MB；仍为自包含（用户无需安装 .NET），首次启动需解压、慢约 0.5–1 秒。
+
+**Full Changelog**: https://github.com/AmengBro/Deepseek-Harness-Starter/compare/v1.2.0...v1.3.0
+
 ---
 
 ## v1.2.1

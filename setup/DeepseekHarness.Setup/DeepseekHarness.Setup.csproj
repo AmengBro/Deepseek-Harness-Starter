@@ -9,10 +9,13 @@
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <AssemblyName>DeepseekHarness.Setup</AssemblyName>
     <RootNamespace>DeepseekHarness.Setup</RootNamespace>
-    <Version>1.2.1</Version>
+    <Version>1.3.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <!-- 单文件内压缩：80 MB → 约 35-40 MB。仍为自包含（用户无需装 .NET），
+         代价是首次启动需解压到临时目录，慢约 0.5-1 秒 -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <MewUIBackend>Direct2D</MewUIBackend>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
